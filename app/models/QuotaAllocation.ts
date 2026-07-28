@@ -9,7 +9,7 @@ export default class QuotaAllocation extends Base {
   declare quota_id: number
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare class_id: number

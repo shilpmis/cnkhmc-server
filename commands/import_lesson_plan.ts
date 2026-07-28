@@ -1,5 +1,5 @@
 import { BaseCommand } from '@adonisjs/core/ace'
-import type { CommandOptions } from '@adonisjs/core/types/ace'
+// import type { CommandOptions } from "@adonisjs/core/types/ace"
 import fs from 'node:fs'
 
 export default class ImportLessonPlan extends BaseCommand {
@@ -25,13 +25,13 @@ export default class ImportLessonPlan extends BaseCommand {
     const content = fs.readFileSync(filePath, 'utf-8')
     const importData = JSON.parse(content)
 
-    const { subject_id, academic_session_id, school_id, data } = importData
+    const { subject_id, academic_year, school_id, data } = importData
 
     this.logger.info(`Importing lesson plan for Subject ID: ${subject_id}`)
 
     // 1. Create or get LessonPlan
     const lessonPlan = await LessonPlan.updateOrCreate(
-      { subjectId: subject_id, academicSessionId: academic_session_id, schoolId: school_id },
+      { subjectId: subject_id, academicYear: academic_year, schoolId: school_id },
       { totalRequiredHours: 0 }
     )
 

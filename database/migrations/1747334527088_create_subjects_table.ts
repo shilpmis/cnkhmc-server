@@ -9,12 +9,10 @@ export default class extends BaseSchema {
       table.string('name').notNullable()
       table.string('code').notNullable()
       table
-        .integer('academic_session_id')
+        .integer('academic_year')
         .unsigned()
         .notNullable()
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
+        
       table.text('description').nullable()      
       table.enum('status', ['Active', 'Inactive']).notNullable()
       table.timestamp('created_at')

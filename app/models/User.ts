@@ -6,7 +6,9 @@ import Schools from './Schools.js'
 import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Staff from './Staff.js'
 import RoleMaster from './RoleMaster.js'
-
+import { manyToMany } from '@adonisjs/lucid/orm'
+import type { ManyToMany } from '@adonisjs/lucid/types/relations'
+import Policy from '#models/policy'
 export default class User extends Base {
   @column()
   declare organization_id: number | null
@@ -52,6 +54,11 @@ export default class User extends Base {
     foreignKey: 'role_id',
   })
   declare role: BelongsTo<typeof RoleMaster>
+
+  @manyToMany(() => Policy, {
+    pivotTable: 'user_policies',
+  })
+  declare policies: ManyToMany<typeof Policy>
 
   @beforeSave()
   static async hashPassword(user: User) {

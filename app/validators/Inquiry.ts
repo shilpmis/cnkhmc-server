@@ -23,7 +23,7 @@ export const CreateValidatorForInquiry = vine.compile(
     special_achievements: vine.string().minLength(3).maxLength(100).optional(),
     applying_for_quota: vine.boolean(),
     quota_type: vine.number().positive().nullable(),
-    academic_session_id: vine.number().positive(),
+    academic_year: vine.number().positive(),
     // is_active: vine.boolean(),
     // is_converted_to_student : vine.boolean().optional(),
   })

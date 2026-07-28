@@ -9,7 +9,7 @@ export default class LeavePolicies extends Base {
   declare school_id: number
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare staff_role_id: number

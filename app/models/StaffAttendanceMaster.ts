@@ -8,7 +8,7 @@ import StaffAttendanceEditRequest from './StaffAttendanceEditRequest.js'
 
 export default class StaffAttendanceMaster extends Base {
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare staff_id: number

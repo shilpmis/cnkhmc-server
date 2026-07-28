@@ -7,28 +7,28 @@ export default class extends BaseSeeder {
     // 1. Create BHMS Subjects
     const subjectsData = [
       // 1st Year
-      { name: 'Anatomy (1st Year)', code: 'ANAT-1', academic_session_id: 2, description: 'Anatomy Department Subject', status: 'Active' as const, year: '1st Year' },
-      { name: 'Physiology (1st Year)', code: 'PHYS-1', academic_session_id: 2, description: 'Physiology Department Subject', status: 'Active' as const, year: '1st Year' },
-      { name: 'Homoeopathic Pharmacy (1st Year)', code: 'PHAR-1', academic_session_id: 2, description: 'Homoeopathic Pharmacy Department Subject', status: 'Active' as const, year: '1st Year' },
+      { name: 'Anatomy (1st Year)', code: 'ANAT-1', academic_year: 2025, description: 'Anatomy Department Subject', status: 'Active' as const, year: '1st Year' },
+      { name: 'Physiology (1st Year)', code: 'PHYS-1', academic_year: 2025, description: 'Physiology Department Subject', status: 'Active' as const, year: '1st Year' },
+      { name: 'Homoeopathic Pharmacy (1st Year)', code: 'PHAR-1', academic_year: 2025, description: 'Homoeopathic Pharmacy Department Subject', status: 'Active' as const, year: '1st Year' },
       
       // 2nd Year
-      { name: 'Pathology & Microbiology (2nd Year)', code: 'PATH-2', academic_session_id: 2, description: 'Pathology & Microbiology Department Subject', status: 'Active' as const, year: '2nd Year' },
-      { name: 'Forensic Medicine & Toxicology (2nd Year)', code: 'FMT-2', academic_session_id: 2, description: 'Forensic Medicine & Toxicology Department Subject', status: 'Active' as const, year: '2nd Year' },
-      { name: 'Organon of Medicine (2nd Year)', code: 'ORGM-2', academic_session_id: 2, description: 'Organon of Medicine Department Subject', status: 'Active' as const, year: '2nd Year' },
-      { name: 'Homoeopathic Materia Medica (2nd Year)', code: 'HMM-2', academic_session_id: 2, description: 'Homoeopathic Materia Medica Department Subject', status: 'Active' as const, year: '2nd Year' },
+      { name: 'Pathology & Microbiology (2nd Year)', code: 'PATH-2', academic_year: 2025, description: 'Pathology & Microbiology Department Subject', status: 'Active' as const, year: '2nd Year' },
+      { name: 'Forensic Medicine & Toxicology (2nd Year)', code: 'FMT-2', academic_year: 2025, description: 'Forensic Medicine & Toxicology Department Subject', status: 'Active' as const, year: '2nd Year' },
+      { name: 'Organon of Medicine (2nd Year)', code: 'ORGM-2', academic_year: 2025, description: 'Organon of Medicine Department Subject', status: 'Active' as const, year: '2nd Year' },
+      { name: 'Homoeopathic Materia Medica (2nd Year)', code: 'HMM-2', academic_year: 2025, description: 'Homoeopathic Materia Medica Department Subject', status: 'Active' as const, year: '2nd Year' },
       
       // 3rd Year
-      { name: 'Surgery (3rd Year)', code: 'SURG-3', academic_session_id: 2, description: 'Surgery Department Subject', status: 'Active' as const, year: '3rd Year' },
-      { name: 'Gynaecology & Obstetrics (3rd Year)', code: 'OBG-3', academic_session_id: 2, description: 'Gynaecology & Obstetrics Department Subject', status: 'Active' as const, year: '3rd Year' },
-      { name: 'Organon of Medicine (3rd Year)', code: 'ORGM-3', academic_session_id: 2, description: 'Organon of Medicine Department Subject', status: 'Active' as const, year: '3rd Year' },
-      { name: 'Homoeopathic Materia Medica (3rd Year)', code: 'HMM-3', academic_session_id: 2, description: 'Homoeopathic Materia Medica Department Subject', status: 'Active' as const, year: '3rd Year' },
+      { name: 'Surgery (3rd Year)', code: 'SURG-3', academic_year: 2025, description: 'Surgery Department Subject', status: 'Active' as const, year: '3rd Year' },
+      { name: 'Gynaecology & Obstetrics (3rd Year)', code: 'OBG-3', academic_year: 2025, description: 'Gynaecology & Obstetrics Department Subject', status: 'Active' as const, year: '3rd Year' },
+      { name: 'Organon of Medicine (3rd Year)', code: 'ORGM-3', academic_year: 2025, description: 'Organon of Medicine Department Subject', status: 'Active' as const, year: '3rd Year' },
+      { name: 'Homoeopathic Materia Medica (3rd Year)', code: 'HMM-3', academic_year: 2025, description: 'Homoeopathic Materia Medica Department Subject', status: 'Active' as const, year: '3rd Year' },
       
       // 4th Year
-      { name: 'Practice of Medicine (4th Year)', code: 'MED-4', academic_session_id: 2, description: 'Practice of Medicine Department Subject', status: 'Active' as const, year: '4th Year' },
-      { name: 'Repertory (4th Year)', code: 'REP-4', academic_session_id: 2, description: 'Repertory Department Subject', status: 'Active' as const, year: '4th Year' },
-      { name: 'Community Medicine (4th Year)', code: 'CMED-4', academic_session_id: 2, description: 'Community Medicine Department Subject', status: 'Active' as const, year: '4th Year' },
-      { name: 'Organon of Medicine (4th Year)', code: 'ORGM-4', academic_session_id: 2, description: 'Organon of Medicine Department Subject', status: 'Active' as const, year: '4th Year' },
-      { name: 'Homoeopathic Materia Medica (4th Year)', code: 'HMM-4', academic_session_id: 2, description: 'Homoeopathic Materia Medica Department Subject', status: 'Active' as const, year: '4th Year' },
+      { name: 'Practice of Medicine (4th Year)', code: 'MED-4', academic_year: 2025, description: 'Practice of Medicine Department Subject', status: 'Active' as const, year: '4th Year' },
+      { name: 'Repertory (4th Year)', code: 'REP-4', academic_year: 2025, description: 'Repertory Department Subject', status: 'Active' as const, year: '4th Year' },
+      { name: 'Community Medicine (4th Year)', code: 'CMED-4', academic_year: 2025, description: 'Community Medicine Department Subject', status: 'Active' as const, year: '4th Year' },
+      { name: 'Organon of Medicine (4th Year)', code: 'ORGM-4', academic_year: 2025, description: 'Organon of Medicine Department Subject', status: 'Active' as const, year: '4th Year' },
+      { name: 'Homoeopathic Materia Medica (4th Year)', code: 'HMM-4', academic_year: 2025, description: 'Homoeopathic Materia Medica Department Subject', status: 'Active' as const, year: '4th Year' },
     ]
 
     await Subjects.createMany(subjectsData)

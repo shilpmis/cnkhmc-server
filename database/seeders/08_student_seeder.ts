@@ -3,7 +3,7 @@ import { BaseSeeder } from '@adonisjs/lucid/seeders'
 
 export default class extends BaseSeeder {
   async run() {
-    const students = [
+    const students: any[] = [
       {
         id: 1, school_id: 1,
         first_name: "Sneha", middle_name: "Vikas", last_name: "Trivedi",
@@ -11,7 +11,7 @@ export default class extends BaseSeeder {
         gender: "Female", birth_date: new Date("2013-08-12"), gr_no: 5004,
         primary_mobile: 9876543213, father_name: "Vikas Trivedi",
         father_name_in_guj: "વિકાસ ત્રિવેદી", mother_name: "Kavita Trivedi",
-        mother_name_in_guj: "કવિતા ત્રિવેદી", roll_number: 20,
+        mother_name_in_guj: "કવિતા ત્રિવેદી", first_year_roll_number: 20,
         aadhar_no: 123456789125, is_active: true, enrollment_code: "HSS23S1"
       },
       {
@@ -21,7 +21,7 @@ export default class extends BaseSeeder {
         gender: "Male", birth_date: new Date("2011-01-22"), gr_no: 5005,
         primary_mobile: 9876543214, father_name: "Jitendra Desai",
         father_name_in_guj: "જિતેન્દ્ર દેસાઈ", mother_name: "Meena Desai",
-        mother_name_in_guj: "મીના દેસાઈ", roll_number: 10,
+        mother_name_in_guj: "મીના દેસાઈ", first_year_roll_number: 10,
         aadhar_no: 123456789126, is_active: true, enrollment_code: "HSS23S2"
       },
       {
@@ -31,7 +31,7 @@ export default class extends BaseSeeder {
         gender: "Female", birth_date: new Date("2010-11-30"), gr_no: 5006,
         primary_mobile: 9876543215, father_name: "Mahesh Joshi",
         father_name_in_guj: "મહેશ જોશી", mother_name: "Lata Joshi",
-        mother_name_in_guj: "લતા જોશી", roll_number: 8,
+        mother_name_in_guj: "લતા જોશી", first_year_roll_number: 8,
         aadhar_no: 123456789127, is_active: true, enrollment_code: "HSS23S3"
       },
       {
@@ -41,7 +41,7 @@ export default class extends BaseSeeder {
         gender: "Male", birth_date: new Date("2012-02-18"), gr_no: 5010,
         primary_mobile: 9876543234, father_name: "Harish Kapadia",
         father_name_in_guj: "હરીશ કાપડિયા", mother_name: "Seema Kapadia",
-        mother_name_in_guj: "સીમા કાપડિયા", roll_number: 5,
+        mother_name_in_guj: "સીમા કાપડિયા", first_year_roll_number: 5,
         aadhar_no: 123456789134, is_active: true, enrollment_code: "HSS23S4"
       },
     ]

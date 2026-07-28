@@ -12,7 +12,7 @@ export default class ConcessionStudentMaster extends Base {
   public static table = 'concessions_student_masters'
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare concession_id: number

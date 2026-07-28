@@ -2,7 +2,6 @@ import { column, belongsTo, hasMany } from '@adonisjs/lucid/orm'
 import type { BelongsTo, HasMany } from '@adonisjs/lucid/types/relations'
 import Base from './base.js'
 import Subjects from './Subjects.js'
-import AcademicSession from './AcademicSession.js'
 import Schools from './Schools.js'
 import LessonPlanTopic from '#models/LessonPlanTopic'
 
@@ -13,7 +12,7 @@ export default class LessonPlan extends Base {
   declare subjectId: number
 
   @column()
-  declare academicSessionId: number
+  declare academicYear: number
 
   @column()
   declare schoolId: number
@@ -26,11 +25,7 @@ export default class LessonPlan extends Base {
   })
   declare subject: BelongsTo<typeof Subjects>
 
-  @belongsTo(() => AcademicSession, {
-    foreignKey: 'academicSessionId',
-  })
-  declare academicSession: BelongsTo<typeof AcademicSession>
-
+  
   @belongsTo(() => Schools, {
     foreignKey: 'schoolId',
   })

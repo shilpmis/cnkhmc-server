@@ -1,4 +1,3 @@
-import AcademicSession from '#models/AcademicSession'
 import ClassDayConfig from '#models/ClassDayConfig'
 import Classes from '#models/Classes'
 import Divisions from '#models/Divisions'
@@ -57,7 +56,7 @@ export default class TimeTableController {
     // Find the staff enrollment for this session
     const staffEnrollment = await db.from('staff_enrollments')
       .where('staff_id', user.staff_id)
-      .where('academic_session_id', academic_session_id)
+      // .where('academic_year', academic_session_id)
       .first()
 
     if (!staffEnrollment) {
@@ -78,58 +77,69 @@ export default class TimeTableController {
     return ctx.response.json(periods)
   }
 
+  async getTeacherAvailability(ctx: HttpContext) {
+    const user = ctx.auth.user!
+    if (!user.staff_id) {
+      return ctx.response.forbidden({ message: 'Only staff can access teacher availability' })
+    }
+
+    const academic_session_id = ctx.request.input('academic_session_id')
+    if (!academic_session_id) {
+      return ctx.response.badRequest({ message: 'academic_session_id is required' })
+    }
+
+    // Return dummy projected availability for now to fix the frontend crashing
+    return ctx.response.json({
+      projectedAvailablePeriods: {},
+      todayIsHoliday: false
+    })
+  }
+
   async getSchoolTimeTableConfig(ctx: HttpContext) {
+    try {
+      let academic_session_id =
+        ctx.params.academic_year ||
+        ctx.params.academic_session_id ||
+        ctx.request.input('academic_year') ||
+        ctx.request.input('academic_session_id');
 
-    let academic_session_id = ctx.params.academic_session_id;
+      if (!academic_session_id) {
+        return ctx.response.ok(null)
+      }
+      
+      let school_timetable_config = await SchoolTimeTableConfig
+        .query()
+        .preload('lab_config')
+        .preload('class_day_config', (query) => {
+          query.preload('period_config')
+        })
+        .where('academic_year', Number(academic_session_id))
+        .first()
 
-    let academic_session = await AcademicSession
-      .query()
-      .where('id', academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
+      if (!school_timetable_config) {
+        return ctx.response.ok(null)
+      }
 
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found' })
+      return ctx.response.json(school_timetable_config)
+    } catch (error) {
+      console.error('Error fetching school timetable config:', error)
+      return ctx.response.ok(null)
     }
-
-    let school_timetable_config = await SchoolTimeTableConfig
-      .query()
-      .preload('lab_config')
-      .preload('class_day_config', (query) => {
-        query.preload('period_config')
-      })
-      .where('academic_session_id', academic_session_id as number)
-      .first()
-
-    if (!school_timetable_config) {
-      return ctx.response.notFound({ message: 'School Time Table Config not found' })
-    }
-
-    return ctx.response.json(school_timetable_config)
   }
 
   async createSchoolTimeTableConfig(ctx: HttpContext) {
 
     let payload = await CreateValidatorForSchoolTimeTableConfig.validate(ctx.request.all())
 
-    let academic_session = await AcademicSession
-      .query()
-      .where('id', payload.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found' })
-    }
-
-    if (!academic_session.is_active) {
-      return ctx.response.badRequest({ message: 'Academic session is not active' })
-    }
     try {
-      // payload.allowed_period_durations = JSON.stringify(payload.allowed_period_durations)
-      let school_timetable_config = await SchoolTimeTableConfig.create({
-      ...payload
-      });
+      const { academic_session_id, ...restPayload } = payload
+      
+      const configData = {
+        ...restPayload,
+        academic_year: restPayload.academic_year || academic_session_id
+      }
+      
+      let school_timetable_config = await SchoolTimeTableConfig.create(configData);
       return ctx.response.status(201).json(school_timetable_config)
     } catch (error) {
       console.log(error)
@@ -149,7 +159,7 @@ export default class TimeTableController {
     } else if (academic_session_id) {
       school_timetable_config = await SchoolTimeTableConfig
         .query()
-        .where('academic_session_id', academic_session_id as number)
+        .where('academic_year', academic_session_id as number)
         .first();
     }
 
@@ -248,19 +258,6 @@ export default class TimeTableController {
       return ctx.response.badRequest({ message: 'School Time Table Config not found' })
     }
 
-    let academic_session = await AcademicSession
-      .query()
-      .where('id', school_timetable_config.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found for this School Time table configuration' })
-    }
-
-    if (!academic_session.is_active) {
-      return ctx.response.badRequest({ message: 'Academic session is not active' })
-    }
     let trx = await db.transaction()
     try {
       let res: LabConfig[] = []
@@ -365,20 +362,6 @@ export default class TimeTableController {
       return ctx.response.badRequest({ message: 'School Time Table Config not found' })
     }
 
-    let academic_session = await AcademicSession
-      .query()
-      .where('id', school_timetable_config.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found for this School Time table configuration' })
-    }
-
-    if (!academic_session.is_active) {
-      return ctx.response.badRequest({ message: 'Academic session is not active' })
-    }
-
     try {
       let class_day_config = await ClassDayConfig.create({
         ...payload
@@ -445,18 +428,8 @@ export default class TimeTableController {
 
   async fetchTimeTableForDivision(ctx: HttpContext) {
     let { division_id } = ctx.params
-    let academic_session_id = ctx.request.input('academic_session');
+    let academic_session_id = ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.params.academic_year || ctx.params.academic_session_id;
     console.log(`Fetching timetable for division: ${division_id}, session: ${academic_session_id}`);
-
-    let academic_session = await AcademicSession
-      .query()
-      .where('id', Number(academic_session_id))
-      .andWhere('school_id', Number(ctx.auth.user!.school_id))
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found' })
-    }
 
     let division = await Divisions.query().where('id', division_id).first();
     if (!division) {
@@ -472,7 +445,7 @@ export default class TimeTableController {
 
     let school_timetable_config = await SchoolTimeTableConfig
       .query()
-      .where('academic_session_id', Number(academic_session_id))
+      .where('academic_year', Number(academic_session_id))
       .preload('lab_config')
       .preload('class_day_config', (class_query) => {
         class_query.preload('period_config', (query) => {
@@ -525,19 +498,6 @@ export default class TimeTableController {
 
     if (!school_timetable_config) {
       return ctx.response.badRequest({ message: 'School Time Table Config not found' })
-    }
-
-    let academic_session = await AcademicSession
-      .query()
-      .where('id', school_timetable_config.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found for this School Time table configuration' })
-    }
-    if (!academic_session.is_active) {
-      return ctx.response.badRequest({ message: 'Academic session is not active' })
     }
 
     // check if division_id is valid
@@ -610,19 +570,6 @@ export default class TimeTableController {
 
     if (!school_timetable_config) {
       return ctx.response.badRequest({ message: 'School Time Table Config not found' })
-    }
-
-    let academic_session = await AcademicSession
-      .query()
-      .where('id', school_timetable_config.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found for this School Time table configuration' })
-    }
-    if (!academic_session.is_active) {
-      return ctx.response.badRequest({ message: 'Academic session is not active' })
     }
 
     // check if division_id is valid
@@ -939,15 +886,6 @@ export default class TimeTableController {
        return ctx.response.notFound({ message: 'School Time Table Config not found' });
     }
 
-    const academicSession = await AcademicSession.query()
-      .where('id', schoolConfig.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first();
-    
-    if (!academicSession) {
-      return ctx.response.forbidden({ message: 'You do not have permission to modify this configuration' });
-    }
-
     const removedCount = await PeriodsConfig.query()
       .where('class_day_config_id', class_day_config_id)
       .delete();
@@ -966,15 +904,6 @@ export default class TimeTableController {
 
     if (!config) {
       return ctx.response.notFound({ message: 'Configuration not found' });
-    }
-
-    // Optional: Check if user has permission (school_id check)
-    // This requires preloading school_timetable_config
-    const schoolConfig = await SchoolTimeTableConfig.find(config.school_timetable_config_id);
-    const academicSession = await AcademicSession.find(schoolConfig?.academic_session_id);
-    
-    if (academicSession?.school_id !== ctx.auth.user?.school_id) {
-       return ctx.response.forbidden({ message: 'You do not have permission to delete this configuration' });
     }
 
     // Delete associated periods first to be safe (though cascade should handle it if set up)
@@ -1278,17 +1207,7 @@ export default class TimeTableController {
 
     console.log("ctx.request.body()" ,ctx.request.body())
 
-    // 1. Validate session, class, division, user
-    const academic_session = await AcademicSession.query()
-      .where('id', academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first();
-    if (!academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session not found' });
-    }
-    if (!academic_session.is_active) {
-      return ctx.response.badRequest({ message: 'Academic session is not active' });
-    }
+    // 1. Validate division, class, user
     const division = await Divisions.query().where('id', division_id).first();
     if (!division) {
       return ctx.response.badRequest({ message: 'Division not found' });
@@ -1312,7 +1231,7 @@ export default class TimeTableController {
       .preload('class_day_config', (query) => {
         query.where('class_id', clas.id);
       })
-      .where('academic_session_id', academic_session_id as number)
+      .where('academic_year', academic_session_id as number)
       .first();
     if (!school_timetable_config) {
       return ctx.response.badRequest({ message: 'School Time Table Config not found' });
@@ -1336,7 +1255,7 @@ export default class TimeTableController {
       .preload('subject_staff_divisioin_master')
       .preload('subject')
       .where('division_id', division_id)
-      .andWhere('academic_session_id', academic_session_id as number)
+      .andWhere('academic_year', academic_session_id as number)
       .andWhere('status', 'Active');
 
     if (!subjectDivisionMasters || subjectDivisionMasters.length === 0) {
@@ -1750,16 +1669,9 @@ export default class TimeTableController {
 
     const schoolId = ctx.auth.user.school_id
 
-    // If academic_session_id is not provided, fetch the active session for the school
+    // If academic_session_id is not provided, return error
     if (!academic_session_id) {
-      const activeSession = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('school_id', schoolId)
-        .first()
-      if (!activeSession) {
-        return ctx.response.badRequest({ message: 'Active academic session not found' })
-      }
-      academic_session_id = activeSession.id
+      return ctx.response.badRequest({ message: 'academic_session is required' })
     }
 
     // Load division
@@ -1774,11 +1686,6 @@ export default class TimeTableController {
       return ctx.response.notFound({ message: 'Class not found' })
     }
 
-    // Load academic session details
-    const academicSession = await db.from('academic_sessions').where('id', academic_session_id).first()
-    if (!academicSession) {
-      return ctx.response.notFound({ message: 'Academic session not found' })
-    }
 
     // Load School Details
     const school = await db.from('schools').where('id', schoolId).first()
@@ -1798,7 +1705,7 @@ export default class TimeTableController {
     // Load timetable config with class day and period configs preloaded
     const school_timetable_config = await SchoolTimeTableConfig
       .query()
-      .where('academic_session_id', Number(academic_session_id))
+      .where('academic_year', Number(academic_session_id))
       .preload('lab_config')
       .preload('class_day_config', (class_query) => {
         class_query.preload('period_config', (query) => {
@@ -1988,8 +1895,8 @@ export default class TimeTableController {
                     { text: 'Division: ', bold: true },
                     { text: `${division?.division || ''} ${division?.aliases ? `(${division.aliases})` : ''}` },
                     { text: '   |   ', color: '#cbd5e1' },
-                    { text: 'Academic Session: ', bold: true },
-                    { text: `${academicSession?.session_name || ''}` }
+                    { text: 'Academic Year: ', bold: true },
+                    { text: `${academic_session_id || ''}` }
                   ],
                   alignment: 'center', margin: [0, 2, 0, 2], fontSize: 9
                 }

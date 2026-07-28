@@ -7,7 +7,7 @@ export default class extends BaseSchema {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
       table.string('uuid').unique();
-      table.integer('academic_session_id').unsigned().references('id').inTable('academic_sessions')
+      table.integer('academic_year').notNullable()
       table.integer('staff_id').unsigned().references('id').inTable('staff')
       table.integer('leave_type_id').unsigned().references('id').inTable('leave_types_master')
       table.integer('applied_by').unsigned().references('id').inTable('users').nullable().defaultTo(null) // For clerk applications

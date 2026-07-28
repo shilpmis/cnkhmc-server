@@ -13,7 +13,7 @@ export default class StudentFeesMaster extends Base {
   declare student_id: number
 
   @column()
-  declare academic_session_id: number | null
+  declare academic_year: number | null
 
   @column()
   declare batch_progression_id: number | null

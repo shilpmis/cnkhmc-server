@@ -60,6 +60,7 @@
         "@adonisjs/lucid": "^21.5.1",
         "@adonisjs/session": "^7.5.0",
         "@adonisjs/validator": "^13.0.2",
+        "@casl/ability": "^7.0.0",
         "@vinejs/vine": "^3.0.0",
         "bcrypt": "^5.1.1",
         "csv-parser": "^3.2.0",
@@ -67,11 +68,12 @@
         "fast-csv": "^5.0.2",
         "jsonwebtoken": "^9.0.2",
         "luxon": "^3.5.0",
-        "mysql2": "^3.12.0",
+        "mysql2": "^3.22.5",
         "pdfmake": "^0.3.7",
         "reflect-metadata": "^0.2.2",
         "strtok3": "6.3.0",
-        "uuid": "^11.1.0"
+        "uuid": "^11.1.0",
+        "xlsx": "^0.18.5"
     },
     "hotHook": {
         "boundaries": [

@@ -8,12 +8,10 @@ export default class extends BaseSchema {
       table.increments('id')
       table.string('name', 100).notNullable()
       table
-        .integer('academic_session_id')
+        .integer('academic_year')
         .unsigned()
         .notNullable()
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
+        
       table.string('description', 255).nullable()
       table
         .integer('division_id')
@@ -26,7 +24,7 @@ export default class extends BaseSchema {
       table.timestamp('created_at')
       table.timestamp('updated_at')
 
-      table.unique(['academic_session_id', 'division_id'])
+      table.unique(['academic_year', 'division_id'])
     })
   }
 

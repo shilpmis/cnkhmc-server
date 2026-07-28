@@ -3,6 +3,7 @@ import LessonPlan from '#models/LessonPlan'
 import LessonPlanTopic from '#models/LessonPlanTopic'
 import LessonPlanSubtopic from '#models/LessonPlanSubtopic'
 import DailyDiary from '#models/DailyDiary'
+import Subjects from '#models/Subjects'
 import db from '@adonisjs/lucid/services/db'
 import ExcelJS from 'exceljs'
 import path from 'node:path'
@@ -28,6 +29,9 @@ const fonts = {
  * Handles plain strings, numbers, richText objects, and formula results.
  */
 function getCellValue(cell: ExcelJS.Cell): string {
+  // If the cell is a merged child cell, its value is technically the master cell's value,
+  // but we want to ignore it to prevent duplicating values (like Hours) across rows.
+  if (cell.isMerged && cell.master && cell.master.address !== cell.address) return ''
   const val = cell.value
   if (val === null || val === undefined) return ''
   if (typeof val === 'string') return val.trim()
@@ -86,13 +90,13 @@ function formatDate(dateStr: string | null | undefined): string {
 export default class LessonPlanController {
   // ── 1. Bulk Upload Syllabus ────────────────────────────────────────────────
   public async bulkUploadSyllabus({ request, response, auth }: HttpContext) {
-    const subjectId = request.input('subjectId')
-    const academicSessionId = request.input('academicSessionId')
+    const subjectId = request.input('subjectId') || request.input('subject_id') || request.input('subject')
+    const academicYear = request.input('academicYear') || request.input('academic_year') || request.input('academicSessionId') || request.input('academic_session_id')
     const schoolId = auth.user?.school_id || request.header('schoolId')
 
     if (!schoolId) return response.badRequest({ message: 'School reference missing' })
-    if (!subjectId || !academicSessionId)
-      return response.badRequest({ message: 'subjectId and academicSessionId are required' })
+    if (!subjectId || !academicYear)
+      return response.badRequest({ message: 'subjectId and academicYear are required' })
 
     const file = request.file('file', { extnames: ['xlsx', 'xls'], size: '20mb' })
     if (!file) return response.badRequest({ message: 'Excel file is required' })
@@ -108,12 +112,12 @@ export default class LessonPlanController {
       const workbook = new ExcelJS.Workbook()
       await workbook.xlsx.readFile(filePath)
 
-      const worksheet = workbook.worksheets[0]
-      if (!worksheet) {
+      const worksheet = workbook.worksheets.find(ws => ws.rowCount > 1) || workbook.worksheets[0]
+      if (!worksheet || worksheet.rowCount <= 1) {
         await trx.rollback()
-        return response.badRequest({ message: 'Excel file is empty' })
+        return response.badRequest({ message: 'Excel file is empty or has no data rows' })
       }
-      console.log(`[Upload Syllabus] Worksheet found. Scanning headers…`)
+      console.log(`[Upload Syllabus] Worksheet '${worksheet.name}' found with ${worksheet.rowCount} rows. Scanning headers…`)
 
       // ── Locate header row (scan first 7 rows) ──────────────────────────────
       const HEADER_KEYWORDS = ['content', 'topic', 'competency', 'slo', 'miller', 'bloom',
@@ -138,7 +142,7 @@ export default class LessonPlanController {
           // Map semantic columns – order matters (most specific first)
           if (['sino', 'slno', 'srno', 'code', 'sno'].some(k => clean === k))         tmpMap.code = c
           if (['topic', 'topicname', 'subjectarea'].some(k => clean.includes(k)))      tmpMap.topicName = c
-          if (clean.includes('content'))                                                 contentCol = c
+          if (clean.includes('content'))                                                 tmpMap.content = c
           if (['competency', 'domainofcompetency'].some(k => clean.includes(k)))       tmpMap.competency = c
           if (['slo', 'specificlearningobjective', 'outcome', 'detail'].some(k => clean.includes(k))) tmpMap.outcome = c
           if (['hours', 'hour', 'nohrs', 'nofhrs'].some(k => clean.includes(k)))      tmpMap.hours = c
@@ -154,23 +158,35 @@ export default class LessonPlanController {
           if (clean.includes('integration'))                                             tmpMap.integration = c
         }
 
-        if (hits >= 2) {
+        if (hits >= 2 || (r === 1 && Object.keys(tmpMap).length >= 1)) {
           headerRowNum = r
           colMap = tmpMap
-          if (!colMap.topicName && contentCol) {
-            colMap.topicName = contentCol
-          } else if (colMap.topicName && contentCol && !colMap.competency) {
-            colMap.competency = contentCol
+          if (!colMap.topicName && colMap.content) {
+            colMap.topicName = colMap.content
           }
           console.log(`[Upload Syllabus] Header row detected at row ${r}:`, colMap)
           break
         }
       }
 
+      if (Object.keys(colMap).length === 0) {
+        console.log(`[Upload Syllabus] Positional fallback column mapping applied (1: code, 2: topic, 3: competency, 4: outcome, 5: hours, 6: lp)`)
+        colMap = {
+          code: 1,
+          topicName: 2,
+          competency: 3,
+          outcome: 4,
+          hours: 5,
+          lpNumber: 6
+        }
+      }
+
       // ── Get or create LessonPlan (clean slate) ─────────────────────────────
+      const targetSubject = await Subjects.find(subjectId)
+      const resolvedYear = targetSubject?.academic_year || (isNaN(Number(academicYear)) ? 2026 : Number(academicYear)) || 2026
+
       let lp = await LessonPlan.query({ client: trx })
         .where('subject_id', subjectId)
-        .where('academic_session_id', academicSessionId)
         .where('school_id', schoolId)
         .first()
 
@@ -183,12 +199,13 @@ export default class LessonPlanController {
           await LessonPlanSubtopic.query({ client: trx }).whereIn('topic_id', oldTopicIds).delete()
         }
         await LessonPlanTopic.query({ client: trx }).where('lesson_plan_id', lp.id).delete()
+        lp.academicYear = resolvedYear
         lp.totalRequiredHours = 0
         await lp.useTransaction(trx).save()
       } else {
         lp = await LessonPlan.create({
-          subjectId: subjectId,
-          academicSessionId: academicSessionId,
+          subjectId: Number(subjectId),
+          academicYear: resolvedYear,
           schoolId: Number(schoolId),
           totalRequiredHours: 0
         }, { client: trx })
@@ -205,7 +222,8 @@ export default class LessonPlanController {
 
         const code       = getCol('code')
         const topicName  = getCol('topicName')
-        let competency   = getCol('competency')
+        const content    = getCol('content')
+        let competency   = getCol('competency') || content
         const outcome    = getCol('outcome')
         const hoursRaw   = getCol('hours')
         const hours      = parseFloat(hoursRaw) || 0
@@ -226,7 +244,7 @@ export default class LessonPlanController {
         const integration = getCol('integration')
 
         // Skip completely empty rows
-        const rowHasContent = topicName || competency || outcome || hours > 0
+        const rowHasContent = topicName || competency || content || outcome || hours > 0 || code
         if (!rowHasContent) continue
 
         // Propagate competency
@@ -239,6 +257,7 @@ export default class LessonPlanController {
         parsedRows.push({
           code,
           topicName,
+          content,
           competency,
           outcome,
           hours,
@@ -297,9 +316,18 @@ export default class LessonPlanController {
           }
         }
 
-        if (!currentTopic) continue
+        if (!currentTopic) {
+          currentTopic = await LessonPlanTopic.create({
+            lessonPlanId: lp.id,
+            name: item.topicName || item.competency || item.outcome || 'General Syllabus',
+            code: item.code || null,
+            requiredHours: 0,
+            isCompleted: false,
+            order: topicOrder++
+          }, { client: trx })
+        }
 
-        const subtopicName = item.competency || item.topicName || `Row ${item.rowNum}`
+        const subtopicName = item.competency || item.content || item.outcome || item.topicName || item.code || `Row ${item.rowNum}`
         subtopicsToCreate.push({
           name: subtopicName,
           code: item.code || null,
@@ -327,7 +355,7 @@ export default class LessonPlanController {
 
       // ── Update total hours on LP ───────────────────────────────────────────
       const allTopics = await LessonPlanTopic.query({ client: trx }).where('lesson_plan_id', lp.id)
-      lp.totalRequiredHours = allTopics.reduce((acc, t) => acc + (t.requiredHours || 0), 0)
+      lp.totalRequiredHours = allTopics.reduce((acc, t) => acc + (Number(t.requiredHours) || 0), 0)
       await lp.useTransaction(trx).save()
 
       console.log(`[Upload Syllabus] Done. ${processedCount} rows processed. Committing…`)
@@ -343,49 +371,99 @@ export default class LessonPlanController {
   // ── 2. Index ──────────────────────────────────────────────────────────────
   public async index({ request, response, auth }: HttpContext) {
     const schoolId = auth.user?.school_id || request.header('schoolId')
-    const academicSessionId = request.input('academicSessionId')
+    const academicYear = request.input('academicYear')
 
     const lessonPlans = await LessonPlan.query()
       .where('school_id', schoolId!)
-      .where('academic_session_id', academicSessionId)
+      .where('academic_year', academicYear)
       .preload('subject')
 
     return response.ok(lessonPlans)
   }
 
   // ── 3. Get by Subject ─────────────────────────────────────────────────────
-  public async getBySubject({ request, response, auth }: HttpContext) {
-    const subjectId = request.param('subjectId')
-    const academicSessionId = request.input('academic_session_id') || request.input('academicSessionId')
-    const schoolId = auth.user?.school_id || request.header('schoolId')
+  public async getBySubject({ request, response }: HttpContext) {
+    try {
+      const subjectId = request.param('subjectId')
+      const subject = await Subjects.find(subjectId)
 
-    const lp = await LessonPlan.query()
-      .where('subject_id', subjectId)
-      .where('academic_session_id', academicSessionId)
-      .where('school_id', schoolId!)
-      .preload('topics', (q) => {
-        q.preload('subtopics')
-      })
-      .first()
+      let matchingIds: number[] = [Number(subjectId)]
+      if (subject) {
+        const cleanName = subject.name.trim().toLowerCase()
+        const matchingSubjects = await Subjects.query()
+          .whereRaw('LOWER(name) = ?', [cleanName])
+        matchingIds = matchingSubjects.map(s => s.id)
+      }
 
-    return response.ok(lp || null)
+      // Fetch the latest lesson plan for the subject
+      let lp = await LessonPlan.query()
+        .whereIn('subject_id', matchingIds)
+        .preload('topics', (q) => {
+          q.orderBy('id', 'asc')
+          q.preload('subtopics', (sq) => {
+            sq.orderBy('id', 'asc')
+          })
+        })
+        .orderBy('id', 'desc')
+        .first()
+
+      return response.ok(lp || null)
+    } catch (error: any) {
+      console.error('Error in getBySubject:', error)
+      return response.status(500).json({ message: 'Failed to fetch lesson plan', error: error?.message || String(error) })
+    }
+  }
+
+  // ── 3b. Assign Topic to Teacher ──────────────────────────────────────────
+  public async assignTopicToTeacher({ request, response }: HttpContext) {
+    try {
+      const topicId = request.param('id')
+      const { staff_ids } = request.body()
+      const topic = await LessonPlanTopic.findOrFail(topicId)
+      topic.assignedStaffIds = Array.isArray(staff_ids) ? staff_ids.map(Number) : null
+      await topic.save()
+
+      return response.ok(topic)
+    } catch (error: any) {
+      return response.badRequest({ message: 'Failed to assign topic to teacher', error: error.message })
+    }
+  }
+
+  // ── 3c. Assign Subtopic to Teacher ───────────────────────────────────────
+  public async assignSubtopicToTeacher({ request, response }: HttpContext) {
+    try {
+      const subtopicId = request.param('id')
+      const { staff_ids } = request.body()
+      const subtopic = await LessonPlanSubtopic.findOrFail(subtopicId)
+      subtopic.assignedStaffIds = Array.isArray(staff_ids) ? staff_ids.map(Number) : null
+      await subtopic.save()
+
+      return response.ok(subtopic)
+    } catch (error: any) {
+      return response.badRequest({ message: 'Failed to assign subtopic to teacher', error: error.message })
+    }
   }
 
   // ── 4. Delete by Subject ──────────────────────────────────────────────────
   public async deleteBySubject({ request, response, auth }: HttpContext) {
     const subjectId = request.param('subjectId')
-    const academicSessionId = request.input('academicSessionId') || request.input('academic_session_id')
+    const academicYear =
+      request.input('academic_session_id') ||
+      request.input('academic_year') ||
+      request.input('academicYear') ||
+      request.input('academicSessionId') ||
+      request.input('academic_session')
     const schoolId = auth.user?.school_id || request.header('schoolId')
 
     if (!schoolId) return response.badRequest({ message: 'School reference missing' })
-    if (!subjectId || !academicSessionId)
-      return response.badRequest({ message: 'subjectId and academicSessionId are required' })
+    if (!subjectId || !academicYear)
+      return response.badRequest({ message: 'subjectId and academicYear are required' })
 
     const trx = await db.transaction()
     try {
       const lp = await LessonPlan.query({ client: trx })
         .where('subject_id', subjectId)
-        .where('academic_session_id', academicSessionId)
+        .where('academic_year', academicYear)
         .where('school_id', schoolId)
         .first()
 
@@ -431,45 +509,69 @@ export default class LessonPlanController {
 
   // ── 7. Coverage Report ────────────────────────────────────────────────────
   public async getCoverageReport({ request, response, auth }: HttpContext) {
-    const academicSessionId = request.param('academicSessionId') || request.input('academicSessionId')
-    const schoolId = auth.user?.school_id || request.header('schoolId')
+    try {
+      const academicYear =
+        request.param('academicSessionId') ||
+        request.param('academicYear') ||
+        request.param('academic_year') ||
+        request.input('academicSessionId') ||
+        request.input('academic_session_id') ||
+        request.input('academicYear') ||
+        request.input('academic_year')
 
-    const lessonPlans = await LessonPlan.query()
-      .where('academic_session_id', academicSessionId)
-      .where('school_id', schoolId!)
-      .preload('subject')
-      .preload('topics', (q) => { q.preload('subtopics') })
+      const subjectId = request.input('subjectId') || request.input('subject_id')
+      const schoolId = auth.user?.school_id || request.header('schoolId')
 
-    const report = lessonPlans.map(lp => {
-      const topics = lp.topics || []
-      let totalSubtopics = 0, completedSubtopics = 0, totalHours = 0, completedHours = 0
+      const query = LessonPlan.query()
 
-      topics.forEach(topic => {
-        if (topic.subtopics && topic.subtopics.length > 0) {
-          topic.subtopics.forEach(st => {
+      if (subjectId) {
+        query.where('subject_id', subjectId)
+      } else if (academicYear) {
+        query.where('academic_year', academicYear)
+      }
+
+      if (schoolId) {
+        query.where('school_id', schoolId)
+      }
+
+      const lessonPlans = await query
+        .preload('subject')
+        .preload('topics', (q) => { q.preload('subtopics') })
+
+      const report = (lessonPlans || []).map(lp => {
+        const topics = lp.topics || []
+        let totalSubtopics = 0, completedSubtopics = 0, totalHours = 0, completedHours = 0
+
+        topics.forEach(topic => {
+          if (topic.subtopics && topic.subtopics.length > 0) {
+            topic.subtopics.forEach(st => {
+              totalSubtopics++
+              totalHours += Number(st.requiredHours) || 0
+              if (st.isCompleted) { completedSubtopics++; completedHours += Number(st.requiredHours) || 0 }
+            })
+          } else {
             totalSubtopics++
-            totalHours += st.requiredHours || 0
-            if (st.isCompleted) { completedSubtopics++; completedHours += st.requiredHours || 0 }
-          })
-        } else {
-          totalSubtopics++
-          totalHours += topic.requiredHours || 0
-          if (topic.isCompleted) { completedSubtopics++; completedHours += topic.requiredHours || 0 }
+            totalHours += Number(topic.requiredHours) || 0
+            if (topic.isCompleted) { completedSubtopics++; completedHours += Number(topic.requiredHours) || 0 }
+          }
+        })
+
+        return {
+          subjectId: lp.subjectId,
+          subjectName: lp.subject?.name || 'Unknown Subject',
+          totalSubtopics,
+          completedSubtopics,
+          totalHours,
+          completedHours,
+          coveragePercentage: totalSubtopics > 0 ? Math.round((completedSubtopics / totalSubtopics) * 100) : 0
         }
       })
 
-      return {
-        subjectId: lp.subjectId,
-        subjectName: lp.subject?.name,
-        totalSubtopics,
-        completedSubtopics,
-        totalHours,
-        completedHours,
-        coveragePercentage: totalSubtopics > 0 ? (completedSubtopics / totalSubtopics) * 100 : 0
-      }
-    })
-
-    return response.ok(report)
+      return response.ok(report)
+    } catch (error) {
+      console.error('Error in getCoverageReport:', error)
+      return response.ok([])
+    }
   }
 
   // ── 8. Update Topic Status ────────────────────────────────────────────────
@@ -494,14 +596,22 @@ export default class LessonPlanController {
 
   // ── 10. Export all LPs as coverage PDF ───────────────────────────────────
   public async exportPDF({ request, response, auth }: HttpContext) {
-    const academicSessionId = request.param('academicSessionId') || request.input('academicSessionId')
+    const academicYear =
+      request.param('academicSessionId') ||
+      request.param('academicYear') ||
+      request.param('academic_year') ||
+      request.input('academicSessionId') ||
+      request.input('academic_session_id') ||
+      request.input('academicYear') ||
+      request.input('academic_year')
+
     const schoolId = auth.user?.school_id || request.header('schoolId')
 
-    if (!schoolId) return response.badRequest({ message: 'School reference missing' })
+    const query = LessonPlan.query()
+    if (academicYear) query.where('academic_year', academicYear)
+    if (schoolId) query.where('school_id', schoolId)
 
-    const lessonPlans = await LessonPlan.query()
-      .where('academic_session_id', academicSessionId)
-      .where('school_id', schoolId)
+    const lessonPlans = await query
       .preload('subject')
       .preload('topics', (q) => { q.preload('subtopics') })
 
@@ -561,7 +671,7 @@ export default class LessonPlanController {
   public async exportLP({ request, response, auth }: HttpContext) {
     const subjectId = request.param('subjectId')
     const lpNumber = request.param('lpNumber')
-    const academicSessionId = request.input('academicSessionId') || request.param('academicSessionId')
+    const academicYear = request.input('academicYear') || request.input('academicSessionId') || request.param('academicYear')
     const schoolId = auth.user?.school_id
 
     if (!schoolId) return response.badRequest({ message: 'School reference missing' })
@@ -578,13 +688,18 @@ export default class LessonPlanController {
     }
 
     // ── A. Load lesson plan ────────────────────────────────────────────────
-    const lp = await LessonPlan.query()
-      .where('subject_id', subjectId)
-      .where('academic_session_id', academicSessionId)
-      .where('school_id', schoolId)
-      .preload('subject')
-      .preload('school')
-      .firstOrFail()
+    let lp: any
+    try {
+      lp = await LessonPlan.query()
+        .where('subject_id', subjectId)
+        .where('academic_year', academicYear)
+        .where('school_id', schoolId)
+        .preload('subject')
+        .preload('school')
+        .firstOrFail()
+    } catch {
+      return response.notFound({ message: `No lesson plan found for subject ${subjectId} in academic year ${academicYear}` })
+    }
 
     // ── B. Load subtopics for this LP number ──────────────────────────────
     const topics = await LessonPlanTopic.query().where('lesson_plan_id', lp.id)
@@ -609,7 +724,7 @@ export default class LessonPlanController {
     let batchName = ''
     const divMaster = await db.from('subjects_division_masters')
       .where('subject_id', subjectId)
-      .where('academic_session_id', academicSessionId)
+      .where('academic_year', academicYear)
       .first()
 
     if (divMaster) {
@@ -672,7 +787,7 @@ export default class LessonPlanController {
         const attendanceData = await db.from('attendance_masters as am')
           .join('attendance_details as ad', 'ad.attendance_master_id', 'am.id')
           .where('am.class_id', classId)
-          .where('am.academic_session_id', academicSessionId)
+          .where('am.academic_year', academicYear)
           .whereIn('am.attendance_date', uniqueSortedDates)
           .whereIn('ad.attendance_status', ['present', 'late', 'half_day'])
           .groupBy('am.attendance_date')
@@ -689,7 +804,7 @@ export default class LessonPlanController {
     if (studentCount === 0 && divMaster) {
       const countRes = await db.from('student_enrollments')
         .where('division_id', divMaster.division_id)
-        .where('academic_session_id', academicSessionId)
+        .where('academic_year', academicYear)
         .count('* as total')
       studentCount = Number((countRes[0] as any).total || 0)
     }

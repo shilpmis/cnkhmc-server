@@ -12,7 +12,7 @@ import BatchProgression from './BatchProgression.js'
 
 export default class AttendanceMasters extends Base {
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare batch_progression_id: number | null

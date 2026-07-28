@@ -8,11 +8,9 @@ export default class extends BaseSchema {
       table.increments('id')
       table.integer('school_id').unsigned().references('id').inTable('schools').onDelete('CASCADE')
       table
-        .integer('academic_session_id')
+        .integer('academic_year')
         .unsigned()
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
+        
       table.string('component_name', 100).notNullable()
       table.string('component_code', 50).nullable()
       table.enum('component_type', ['earning', 'deduction', 'benefits']).notNullable()

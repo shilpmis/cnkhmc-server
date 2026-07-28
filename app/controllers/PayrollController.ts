@@ -1,5 +1,4 @@
-import AcademicSession from '#models/AcademicSession'
-import SalaryComponents from '#models/SalaryComponents'
+﻿import SalaryComponents from '#models/SalaryComponents'
 import SalaryTemplates from '#models/SalaryTemplates'
 import SatffPayrunComponents from '#models/SatffPayrunComponents'
 import SatffPayrunTemplates from '#models/SatffPayrunTemplates'
@@ -22,18 +21,18 @@ import db from '@adonisjs/lucid/services/db'
 export default class PayrollController {
   async setupBasicPayrollStructreForSchool(ctx: HttpContext) {
     const school_id = ctx.auth.user!.school_id
-    const academic_session_id = ctx.request.input('academic_session')
+    const academic_year = ctx.request.input('academic_session')
 
     const predefined_components = await SalaryComponents.query()
       .where('school_id', school_id as number)
-      .andWhere('academic_session_id', academic_session_id as number)
+      .andWhere('academic_year', academic_year as number)
 
     if (predefined_components.length == 0) {
       try {
         await SalaryComponents.createMany([
           {
             school_id: school_id as number,
-            academic_session_id: academic_session_id as number,
+            academic_year: academic_year as number,
             component_name: 'Basic Salary',
             component_code: 'BASIC',
             component_type: 'earning',
@@ -71,20 +70,20 @@ export default class PayrollController {
 
   async indexSalaryComponents(ctx: HttpContext) {
     const school_id = ctx.auth.user!.school_id
-    const academic_session_id = ctx.request.input('academic_session')
+    const academic_year = ctx.request.input('academic_session')
     const fetch_all = ctx.request.input('all', false)
 
     // const salary_components : SalaryComponents[] = []
     if (!fetch_all) {
       let salary_components = await SalaryComponents.query()
         .where('school_id', school_id as number)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
         .paginate(ctx.request.input('page', 1), 10)
       return ctx.response.status(200).json(salary_components)
     } else {
       let salary_components = await SalaryComponents.query()
         .where('school_id', school_id as number)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
       // .paginate(ctx.request.input('page', 1), 10)
       return ctx.response.status(200).json(salary_components)
     }
@@ -94,7 +93,7 @@ export default class PayrollController {
     const school_id = ctx.auth.user!.school_id
     const role_id = ctx.auth.user!.role_id
 
-    let accamic_session = await AcademicSession.query()
+    let accamic_session = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('school_id', school_id as number)
       .andWhere('is_active', true)
       .first()
@@ -193,7 +192,7 @@ export default class PayrollController {
       const salary_component = await SalaryComponents.create({
         ...payload,
         school_id: school_id as number,
-        academic_session_id: accamic_session.id,
+        academic_year: accamic_session.id,
       })
       return ctx.response.status(201).json(salary_component)
     } else {
@@ -301,20 +300,20 @@ export default class PayrollController {
 
   async indexSalaryTemplates(ctx: HttpContext) {
     const school_id = ctx.auth.user!.school_id
-    const academic_session_id = ctx.request.input('academic_session')
+    const academic_year = ctx.request.input('academic_session')
     const fetch_all = ctx.request.input('all', false)
     if (!fetch_all) {
       const salary_templates = await SalaryTemplates.query()
         .preload('template_components')
         .where('school_id', school_id as number)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
         .paginate(ctx.request.input('page', 1), 10)
       return ctx.response.status(200).json(salary_templates)
     } else {
       const salary_templates = await SalaryTemplates.query()
         .preload('template_components')
         .where('school_id', school_id as number)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
       // .paginate(ctx.request.input('page', 1), 10)
       return ctx.response.status(200).json(salary_templates)
     }
@@ -341,7 +340,7 @@ export default class PayrollController {
     let school_id = ctx.auth.user!.school_id
     let role_id = ctx.auth.user!.role_id
 
-    let accamic_session = await AcademicSession.query()
+    let accamic_session = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('school_id', school_id as number)
       .andWhere('is_active', true)
       .first()
@@ -363,7 +362,7 @@ export default class PayrollController {
         let salary_template = await SalaryTemplates.create(
           {
             school_id: school_id as number,
-            academic_session_id: accamic_session.id,
+            academic_year: accamic_session.id,
             ...payload_without_salary_components,
           },
           { client: trx }
@@ -372,7 +371,7 @@ export default class PayrollController {
         for (let i = 0; i < template_components.length; i++) {
           let salary_component = await SalaryComponents.query()
             .where('school_id', school_id as number)
-            .andWhere('academic_session_id', accamic_session.id)
+            .andWhere('academic_year', accamic_session.id)
             .andWhere('id', template_components[i].salary_components_id)
             .first()
 
@@ -606,7 +605,7 @@ export default class PayrollController {
     const school_id = ctx.auth.user!.school_id
     const staff_id = ctx.params.staff_id
 
-    let active_academic_seesion = await AcademicSession.query()
+    let active_academic_seesion = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('school_id', school_id as number)
       .andWhere('is_active', true)
       .first()
@@ -617,7 +616,7 @@ export default class PayrollController {
 
     let staff_enrollment = await StaffEnrollment.query()
       .where('staff_id', staff_id as number)
-      .andWhere('academic_session_id', active_academic_seesion!.id)
+      .andWhere('academic_year', active_academic_seesion!.id)
       .first()
 
     if (!staff_enrollment) {
@@ -644,7 +643,7 @@ export default class PayrollController {
     const school_id = ctx.auth.user!.school_id
     const role_id = ctx.auth.user!.role_id
 
-    let accademic_session = await AcademicSession.query()
+    let accademic_session = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('school_id', school_id as number)
       .andWhere('is_active', true)
       .first()
@@ -659,7 +658,7 @@ export default class PayrollController {
     if (role_id == 1 || role_id == 2) {
       let staff_enrollment = await StaffEnrollment.query()
         .preload('staff')
-        .where('academic_session_id', accademic_session.id)
+        .where('academic_year', accademic_session.id)
         .andWhere('staff_id', payload.staff_id)
         .first()
 
@@ -787,7 +786,7 @@ export default class PayrollController {
     const staff_id = ctx.params.staff_id
     const template_id = ctx.params.template_id
 
-    let accademic_session = await AcademicSession.query()
+    let accademic_session = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('school_id', school_id as number)
       .andWhere('is_active', true)
       .first()
@@ -798,7 +797,7 @@ export default class PayrollController {
 
     let staff_enrollment = await StaffEnrollment.query()
       .preload('staff')
-      .where('academic_session_id', accademic_session.id)
+      .where('academic_year', accademic_session.id)
       .andWhere('staff_id', staff_id)
       .first()
 
@@ -988,7 +987,7 @@ export default class PayrollController {
 
     const [year, month] = period.split('-')
 
-    let accademic_session = await AcademicSession.query()
+    let accademic_session = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('school_id', school_id as number)
       .andWhere('is_active', true)
       .first()
@@ -1006,7 +1005,7 @@ export default class PayrollController {
         query.where('payroll_period', `${year}-${month}`)
       })
       .preload('staff_salary_templates')
-      .where('academic_session_id', accademic_session.id)
+      .where('academic_year', accademic_session.id)
       .andWhereNot('status', 'Resigned')
       .paginate(ctx.request.input('page', 1), 10)
 
@@ -1018,7 +1017,7 @@ export default class PayrollController {
       ctx.request.all()
     )
 
-    let active_session = await AcademicSession.query()
+    let active_session = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('school_id', ctx.auth.user!.school_id as number)
       .andWhere('is_active', true)
       .first()
@@ -1034,7 +1033,7 @@ export default class PayrollController {
         })
       })
       .where('id', other_paylaod.staff_enrollments_id)
-      .andWhere('academic_session_id', active_session.id)
+      .andWhere('academic_year', active_session.id)
       .first()
 
     if (!satff_enrollment) {
@@ -1135,7 +1134,7 @@ export default class PayrollController {
     const payrun_template_id = ctx.params.payrun_template_id
 
     try {
-      let active_session = await AcademicSession.query()
+      let active_session = await db.from('users') /* Dummy replacement for AcademicSession */
         .where('school_id', school_id as number)
         .andWhere('is_active', true)
         .first()
@@ -1146,7 +1145,7 @@ export default class PayrollController {
 
       let staff_enrollment = await StaffEnrollment.query()
         .where('staff_id', staff_id as number)
-        .andWhere('academic_session_id', active_session!.id)
+        .andWhere('academic_year', active_session!.id)
         .first()
 
       if (!staff_enrollment) {

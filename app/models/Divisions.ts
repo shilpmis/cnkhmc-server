@@ -11,7 +11,7 @@ export default class Divisions extends Base {
   declare class_id: number
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare division: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'J' | 'K' | 'L'

@@ -5,6 +5,8 @@ import type { BelongsTo, HasMany, HasOne } from '@adonisjs/lucid/types/relations
 import StaffMaster from './StaffMaster.js'
 import ClassTeacherMaster from '#models/Classteachermaster'
 import StaffEnrollment from './StaffEnrollment.js'
+import Department from './Department.js'
+import StaffExperience from './staff_experience.js'
 
 export default class Staff extends Base {
   @column()
@@ -28,6 +30,9 @@ export default class Staff extends Base {
   // DB column: short_name (matches)
   @column()
   declare short_name: string | null
+
+  @column()
+  declare department_id: number | null
 
   @column()
   declare department: string | null
@@ -372,4 +377,18 @@ export default class Staff extends Base {
     foreignKey: 'staff_id',
   })
   declare enrollments: HasMany<typeof StaffEnrollment>
+
+
+
+  @belongsTo(() => Department, {
+    localKey: 'id',
+    foreignKey: 'department_id',
+  })
+  declare department_details: BelongsTo<typeof Department>
+
+  @hasMany(() => StaffExperience, {
+    localKey: 'id',
+    foreignKey: 'staff_id',
+  })
+  declare experiences: HasMany<typeof StaffExperience>
 }

@@ -14,12 +14,8 @@ export default class extends BaseSchema {
         .onUpdate('CASCADE')
         .onDelete('CASCADE')
       table
-        .integer('academic_session_id')
-        .unsigned()
+        .integer('academic_year')
         .notNullable()
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
 
       table
         .enum('class', [

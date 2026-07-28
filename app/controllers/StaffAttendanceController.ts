@@ -62,7 +62,7 @@ export default class StaffAttendanceController {
         } else {
           await StaffAttendanceMaster.create({
             staff_id: staffId,
-            academic_session_id: payload.academic_session_id as number as number,
+            academic_year: payload.academic_year as number as number,
             attendance_date: new Date(today),
             check_in_time: payload.check_in_time,
             status: 'present',
@@ -240,7 +240,7 @@ export default class StaffAttendanceController {
         } else {
           await StaffAttendanceMaster.create({
             staff_id: payload.staff_id,
-            academic_session_id: payload.academic_session_id as number as number,
+            academic_year: payload.academic_year as number as number,
             attendance_date: new Date(payload.attendance_date),
             check_in_time: payload.check_in_time,
             check_out_time: payload.check_out_time,

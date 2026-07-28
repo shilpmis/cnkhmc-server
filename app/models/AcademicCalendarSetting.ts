@@ -1,13 +1,11 @@
 import Base from '#models/base'
-import { belongsTo, column } from '@adonisjs/lucid/orm'
-import type * as relations from '@adonisjs/lucid/types/relations'
-import AcademicSession from '#models/AcademicSession'
+import { column } from '@adonisjs/lucid/orm'
 
 export default class AcademicCalendarSetting extends Base {
   static table = 'academic_calendar_settings'
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column({
     prepare: (value: string[]) => JSON.stringify(value || []),
@@ -26,9 +24,7 @@ export default class AcademicCalendarSetting extends Base {
   @column()
   declare is_saturday_working: boolean
 
-  @belongsTo(() => AcademicSession, {
-    foreignKey: 'academic_session_id',
-  })
-  declare academic_session: relations.BelongsTo<typeof AcademicSession>
+  
+  
 }
 

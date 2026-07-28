@@ -15,12 +15,10 @@ export default class extends BaseSchema {
         .onDelete('CASCADE') // Ensure cascading delete
 
       table
-        .integer('academic_session_id')
+        .integer('academic_year')
         .unsigned()
         .notNullable()
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
+        
 
       table.string('student_name', 255).notNullable()
       table.date('dob').notNullable()

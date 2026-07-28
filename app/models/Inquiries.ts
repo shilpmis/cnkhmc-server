@@ -2,7 +2,6 @@ import { belongsTo, column, hasOne } from '@adonisjs/lucid/orm'
 import Base from './base.js'
 import * as relations from '@adonisjs/lucid/types/relations'
 import Schools from './Schools.js'
-import AcademicSession from './AcademicSession.js'
 import ClassSeatAvailability from './ClassSeatAvailability.js'
 import Quota from './Quota.js'
 import User from './User.js'
@@ -18,7 +17,7 @@ export default class AdmissionInquiry extends Base {
   declare student_enrollments_id: number | null
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   // New name fields
   @column()
@@ -103,8 +102,8 @@ export default class AdmissionInquiry extends Base {
   @belongsTo(() => Schools, { foreignKey: 'school_id' })
   declare school: relations.BelongsTo<typeof Schools>
 
-  @belongsTo(() => AcademicSession, { foreignKey: 'academic_session_id' })
-  declare academic_session: relations.BelongsTo<typeof AcademicSession>
+  
+  
 
   @belongsTo(() => ClassSeatAvailability, { foreignKey: 'inquiry_for_class' })
   declare class_seat_availability: relations.BelongsTo<typeof ClassSeatAvailability>

@@ -3,7 +3,6 @@ import { schema } from '@adonisjs/validator'
 import db from '@adonisjs/lucid/services/db'
 
 import Division from '#models/Divisions'
-import AcademicSession from '#models/AcademicSession'
 import StudentEnrollments from '#models/StudentEnrollments'
 import Students from '#models/Students'
 import { ValidatioinStatusForDrop, ValidatioinStatusForMigration, ValidatioinStatusForSuspended } from '#validators/StudentManagement'
@@ -16,27 +15,24 @@ export default class StudentManagementController {
    */
 
   public async indexStudentForManagement(ctx: HttpContext) {
-    let schoolId = ctx.auth.user?.school_id
+    let school_id = ctx.auth.user?.school_id
     let division = ctx.params.division_id;
 
-    let active_academic_session = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('school_id', schoolId!)
-      .first()
+    let academic_year = ctx.request.qs().academic_session
 
-    if (!active_academic_session) {
+    if (!academic_year) {
       return ctx.response.status(400).json({
         success: false,
         message: 'No active academic session found',
       })
     }
 
-    console.log("division ", division, active_academic_session.id)
+    console.log("division ", division, academic_year)
 
     let student = await StudentEnrollments
       .query()
       .where('division_id', division)
-      .andWhere('academic_session_id', active_academic_session.id)
+      .andWhere('academic_year', academic_year)
       .preload('student', (query) => {
         query.select(['id', 'enrollment_code', 'first_name', 'middle_name', 'last_name', 'gr_no'])
       })
@@ -48,8 +44,8 @@ export default class StudentManagementController {
 
 
   public async updateEnrollmentStatusToMigrate(ctx: HttpContext) {
+    let school_id = ctx.auth.user?.school_id
     let student_enrollment_id = ctx.params.student_enrollment_id;
-    let school_id = ctx.auth.user!.school_id
 
     let student_enrollment = await StudentEnrollments.query()
       .preload('division')
@@ -60,18 +56,6 @@ export default class StudentManagementController {
       return ctx.response.status(400).json({
         success: false,
         message: 'Student enrollment not found',
-      })
-    }
-
-    let check_academic_session = await AcademicSession.query()
-      .where('id', student_enrollment.academic_session_id as number)
-      .andWhere('school_id', school_id!)
-      .first()
-
-    if (!check_academic_session) {
-      return ctx.response.status(400).json({
-        success: false,
-        message: 'Academic session not found',
       })
     }
 
@@ -131,7 +115,7 @@ export default class StudentManagementController {
       let new_enrollment = await StudentEnrollments.create({
         student_id: student_enrollment.student_id,
         division_id: new_division.id,
-        academic_session_id: student_enrollment.academic_session_id as number,
+        academic_year: student_enrollment.academic_year as number,
         status: 'pursuing',
         quota_id: student_enrollment.quota_id,
         is_new_admission: false,
@@ -162,7 +146,6 @@ export default class StudentManagementController {
 
   public async updateEnrollmentStatusToDrop(ctx: HttpContext) {
     let student_enrollment_id = ctx.params.student_enrollment_id;
-    let school_id = ctx.auth.user!.school_id
 
     let student_enrollment = await StudentEnrollments.query()
       .preload('student')
@@ -174,18 +157,6 @@ export default class StudentManagementController {
       return ctx.response.status(400).json({
         success: false,
         message: 'Student enrollment not found',
-      })
-    }
-
-    let check_academic_session = await AcademicSession.query()
-      .where('id', student_enrollment.academic_session_id as number)
-      .andWhere('school_id', school_id!)
-      .first()
-
-    if (!check_academic_session) {
-      return ctx.response.status(400).json({
-        success: false,
-        message: 'Academic session not found',
       })
     }
 
@@ -229,7 +200,6 @@ export default class StudentManagementController {
 
   public async updateEnrollmentStatusToComplete(ctx: HttpContext) {
     let student_enrollment_id = ctx.params.student_enrollment_id;
-    let school_id = ctx.auth.user!.school_id
 
     let student_enrollment = await StudentEnrollments.query()
       .preload('student')
@@ -241,18 +211,6 @@ export default class StudentManagementController {
       return ctx.response.status(400).json({
         success: false,
         message: 'Student enrollment not found',
-      })
-    }
-
-    let check_academic_session = await AcademicSession.query()
-      .where('id', student_enrollment.academic_session_id as number)
-      .andWhere('school_id', school_id!)
-      .first()
-
-    if (!check_academic_session) {
-      return ctx.response.status(400).json({
-        success: false,
-        message: 'Academic session not found',
       })
     }
 
@@ -293,7 +251,6 @@ export default class StudentManagementController {
 
   public async updateEnrollmentStatusToSuspended(ctx: HttpContext) {
     let student_enrollment_id = ctx.params.student_enrollment_id;
-    let school_id = ctx.auth.user!.school_id
 
     let payload = await ValidatioinStatusForSuspended.validate(ctx.request.all())
 
@@ -307,18 +264,6 @@ export default class StudentManagementController {
       return ctx.response.status(400).json({
         success: false,
         message: 'Student enrollment not found',
-      })
-    }
-
-        let check_academic_session = await AcademicSession.query()
-      .where('id', student_enrollment.academic_session_id as number)
-      .andWhere('school_id', school_id!)
-      .first()
-    
-    if (!check_academic_session) {
-      return ctx.response.status(400).json({
-        success: false,
-        message: 'Academic session not found',
       })
     }
 
@@ -391,14 +336,6 @@ export default class StudentManagementController {
       const limit = payload.limit || 50
 
       const school_id = ctx.auth.user?.school_id
-      const session = await AcademicSession.query()
-        .where('id', payload.academic_session_id as number)
-        .if(school_id !== undefined, (query) => query.andWhere('school_id', school_id!))
-        .first()
-
-      if (!session) {
-        return ctx.response.badRequest({ success: false, message: 'Academic session not found' })
-      }
       const division = await Division.query()
         .if(payload.division_id !== undefined, (query) => query.where('id', payload.division_id!))
         .first()
@@ -418,7 +355,7 @@ export default class StudentManagementController {
         return ctx.response.badRequest({ success: false, message: 'Invalid status' })
       }
       const query = StudentEnrollments.query()
-        .where('academic_session_id', payload.academic_session_id)
+        .where('academic_year', payload.academic_session_id)
         .if(payload.status, (q) => q.where('status', payload.status!))
         .preload('student', (query) => {
           query.preload('fees_status')
@@ -485,27 +422,17 @@ export default class StudentManagementController {
       return response.badRequest({ message: 'Student not found or inactive' })
     }
     try {
-      const [sourceSession, targetSession, sourceDivision, targetDivision] = await Promise.all([
-        AcademicSession.query()
-          .where('id', payload.source_academic_session_id)
-          .if(school_id !== undefined, (query) => query.where('school_id', school_id!))
-          .first(),
-        AcademicSession.query()
-          .where('id', payload.target_academic_session_id)
-          .if(school_id !== undefined, (query) => query.where('school_id', school_id!))
-          .first(),
+      const [sourceDivision, targetDivision] = await Promise.all([
         Division.query().where('id', payload.source_division_id).first(),
         Division.query().where('id', payload.target_division_id).first(),
       ])
 
-      if (!sourceSession) return response.badRequest({ message: 'Source session not found' })
-      if (!targetSession) return response.badRequest({ message: 'Target session not found' })
       if (!sourceDivision) return response.badRequest({ message: 'Source division not found' })
       if (!targetDivision) return response.badRequest({ message: 'Target division not found' })
 
       const currentEnrollment = await StudentEnrollments.query({ client: trx })
         .where('student_id', payload.student_id)
-        .andWhere('academic_session_id', payload.source_academic_session_id)
+        .andWhere('academic_year', payload.source_academic_session_id)
         .andWhere('status', 'pursuing')
         .first()
 
@@ -515,7 +442,7 @@ export default class StudentManagementController {
 
       const alreadyEnrolled = await StudentEnrollments.query({ client: trx })
         .where('student_id', payload.student_id)
-        .andWhere('academic_session_id', payload.target_academic_session_id)
+        .andWhere('academic_year', payload.target_academic_session_id)
         .first()
 
       if (alreadyEnrolled) {
@@ -535,7 +462,7 @@ export default class StudentManagementController {
       newEnrollment.fill({
         student_id: payload.student_id,
         division_id: payload.target_division_id,
-        academic_session_id: payload.target_academic_session_id,
+        academic_year: payload.target_academic_session_id,
         quota_id: currentEnrollment.quota_id,
         status: 'pursuing',
         remarks: payload.remarks || '',
@@ -576,19 +503,7 @@ export default class StudentManagementController {
     }
 
     try {
-      const [targetSession, targetDivision] = await Promise.all([
-        AcademicSession.query()
-          .where('id', payload.target_academic_session_id)
-          .if(school_id !== undefined, (q) => q.where('school_id', school_id as number))
-          .first(),
-        Division.find(payload.target_division_id),
-      ])
-
-      if (!targetSession) {
-        return response.badRequest({
-          message: 'Target academic session not found or invalid for this school',
-        })
-      }
+      const targetDivision = await Division.find(payload.target_division_id)
 
       if (!targetDivision) {
         return response.badRequest({ message: 'Target division not found' })
@@ -611,7 +526,7 @@ export default class StudentManagementController {
 
           const currentEnrollment = await StudentEnrollments.query({ client: trx })
             .where('student_id', student_id)
-            .andWhere('academic_session_id', payload.source_academic_session_id)
+            .andWhere('academic_year', payload.source_academic_session_id)
             .andWhere('status', 'pursuing')
             .first()
 
@@ -625,7 +540,7 @@ export default class StudentManagementController {
 
           const alreadyEnrolled = await StudentEnrollments.query({ client: trx })
             .where('student_id', student_id)
-            .andWhere('academic_session_id', payload.target_academic_session_id)
+            .andWhere('academic_year', payload.target_academic_session_id)
             .first()
 
           if (alreadyEnrolled) {
@@ -647,7 +562,7 @@ export default class StudentManagementController {
           newEnrollment.fill({
             student_id,
             division_id: payload.target_division_id,
-            academic_session_id: payload.target_academic_session_id,
+            academic_year: payload.target_academic_session_id,
             quota_id: currentEnrollment.quota_id,
             status: 'pursuing',
             remarks: payload.remarks || '',
@@ -689,7 +604,7 @@ export default class StudentManagementController {
       const query = StudentEnrollments.query()
         .select(
           'student_id',
-          'academic_session_id',
+          'academic_year',
           'division_id',
           'status',
           'remarks',
@@ -699,7 +614,7 @@ export default class StudentManagementController {
         .orderBy('promoted_at', 'desc')
 
       if (sessionId) {
-        query.where('academic_session_id', sessionId)
+        query.where('academic_year', sessionId)
       }
 
       const data = await query
@@ -743,25 +658,12 @@ export default class StudentManagementController {
         })
       }
 
-      // Validate sessions
-      const [sourceSession, targetSession] = await Promise.all([
-        AcademicSession.query()
-          .where('id', payload.source_academic_session_id)
-          .if(schoolId !== undefined, (q) => q.where('school_id', schoolId!))
-          .first(),
-        AcademicSession.query()
-          .where('id', payload.target_academic_session_id)
-          .if(schoolId !== undefined, (q) => q.where('school_id', schoolId!))
-          .first(),
-      ])
-
-      if (!sourceSession) return response.badRequest({ message: 'Source session not found' })
-      if (!targetSession) return response.badRequest({ message: 'Target session not found' })
+      // Validate sessions (removed since AcademicSession is deprecated)
 
       // Get current enrollment
       const currentEnrollment = await StudentEnrollments.query({ client: trx })
         .where('student_id', payload.student_id)
-        .andWhere('academic_session_id', payload.source_academic_session_id)
+        .andWhere('academic_year', payload.source_academic_session_id)
         .andWhere('status', 'pursuing')
         .first()
 
@@ -772,7 +674,7 @@ export default class StudentManagementController {
       // Prevent duplicate enrollment in target session
       const alreadyEnrolled = await StudentEnrollments.query({ client: trx })
         .where('student_id', payload.student_id)
-        .andWhere('academic_session_id', payload.target_academic_session_id)
+        .andWhere('academic_year', payload.target_academic_session_id)
         .first()
 
       if (alreadyEnrolled) {
@@ -790,7 +692,7 @@ export default class StudentManagementController {
       newEnrollment.fill({
         student_id: payload.student_id,
         division_id: currentEnrollment.division_id,
-        academic_session_id: payload.target_academic_session_id,
+        academic_year: payload.target_academic_session_id,
         quota_id: currentEnrollment.quota_id,
         status: 'pursuing',
         remarks: payload.remarks || '',
@@ -832,15 +734,7 @@ export default class StudentManagementController {
     const schoolId = auth.user?.school_id
 
     try {
-      // Validate target session
-      const targetSession = await AcademicSession.query()
-        .where('id', payload.target_academic_session_id)
-        .if(schoolId !== undefined, (q) => q.where('school_id', schoolId!))
-        .first()
-
-      if (!targetSession) {
-        return response.badRequest({ message: 'Target academic session not found' })
-      }
+      // Validate target session (removed since AcademicSession is deprecated)
 
       // Validate students
       const students = await Students.query({ client: trx })
@@ -852,7 +746,7 @@ export default class StudentManagementController {
       // Get current enrollments
       const currentEnrollments = await StudentEnrollments.query({ client: trx })
         .whereIn('student_id', validStudentIds)
-        .andWhere('academic_session_id', payload.source_academic_session_id)
+        .andWhere('academic_year', payload.source_academic_session_id)
         .andWhere('status', 'pursuing')
 
       const currentEnrollmentMap = new Map(currentEnrollments.map((en) => [en.student_id, en]))
@@ -860,7 +754,7 @@ export default class StudentManagementController {
       // Check for already enrolled in target session
       const alreadyEnrolled = await StudentEnrollments.query({ client: trx })
         .whereIn('student_id', validStudentIds)
-        .andWhere('academic_session_id', payload.target_academic_session_id)
+        .andWhere('academic_year', payload.target_academic_session_id)
 
       const alreadyEnrolledIds = new Set(alreadyEnrolled.map((e) => e.student_id))
 
@@ -886,7 +780,7 @@ export default class StudentManagementController {
         return {
           student_id: id,
           division_id: enrollment.division_id,
-          academic_session_id: payload.target_academic_session_id,
+          academic_year: payload.target_academic_session_id,
           quota_id: enrollment.quota_id,
           status: 'pursuing',
           remarks: payload.remarks || '',

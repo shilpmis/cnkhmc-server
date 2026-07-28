@@ -3,7 +3,6 @@ import fs from 'node:fs'
 import LessonPlan from '#models/LessonPlan'
 import LessonPlanTopic from '#models/LessonPlanTopic'
 import LessonPlanSubtopic from '#models/LessonPlanSubtopic'
-import AcademicSession from '#models/AcademicSession'
 import Subjects from '#models/Subjects'
 
 export default class extends BaseSeeder {
@@ -19,8 +18,7 @@ export default class extends BaseSeeder {
     const { data } = importData
 
     // Resolve active academic session
-    const session = await AcademicSession.query().where('is_active', true).first()
-    const resolvedAcademicSessionId = session ? session.id : 2
+    const resolvedAcademicSessionId = new Date().getFullYear()
 
     // Resolve subject (e.g. HMM-2)
     const subject = await Subjects.query().where('code', 'HMM-2').first()
@@ -32,7 +30,7 @@ export default class extends BaseSeeder {
 
     // 1. Create or get LessonPlan
     const lessonPlan = await LessonPlan.updateOrCreate(
-      { subjectId: resolvedSubjectId, academicSessionId: resolvedAcademicSessionId, schoolId: resolvedSchoolId },
+      { subjectId: resolvedSubjectId, academicYear: resolvedAcademicSessionId, schoolId: resolvedSchoolId },
       { totalRequiredHours: 0 }
     )
 

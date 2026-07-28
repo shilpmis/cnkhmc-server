@@ -9,7 +9,7 @@ export default class SchoolTimeTableConfig extends Base {
     static table = 'school_timetable_config'
 
     @column()
-    declare academic_session_id: number
+    declare academic_year: number
 
     @column()
     declare max_periods_per_day: number

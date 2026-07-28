@@ -120,7 +120,7 @@ export default class extends BaseSeeder {
         account_no: 4567890123, IFSC_code: "UTIB0004567",
         is_teching_staff: false, qualification: null, employee_code: "3"
       },
-    ]
+    ] as any[]
 
     for (const staff of staffList) {
       await Staff.updateOrCreate({ id: staff.id }, staff)

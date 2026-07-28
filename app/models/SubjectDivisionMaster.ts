@@ -17,7 +17,7 @@ export default class SubjectDivisionMaster extends Base {
     declare division_id: number
 
     @column()
-    declare academic_session_id: number
+    declare academic_year: number
 
     @column()
     declare code_for_division: string

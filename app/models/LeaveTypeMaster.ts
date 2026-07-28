@@ -5,7 +5,7 @@ export default class LeaveTypeMaster extends Base {
   static table = 'leave_types_master'
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare school_id: number

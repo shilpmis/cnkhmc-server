@@ -5,12 +5,11 @@ import vine from "@vinejs/vine";
  */
 export const CreateValidatorForSubject = vine.compile(
   vine.object({
-    // add here
-    name: vine.string().trim().minLength(3).maxLength(255),
-    // code: vine.string().trim().minLength(3).maxLength(255),
-    description: vine.string().trim().maxLength(255).optional(),
-    academic_session_id: vine.number(),
-    year: vine.string().trim().maxLength(50).optional()
+    name: vine.string().trim().minLength(1).maxLength(255),
+    description: vine.string().trim().maxLength(255).optional().nullable(),
+    academic_year: vine.number().optional(),
+    academic_session_id: vine.number().optional(),
+    year: vine.string().trim().maxLength(50).optional().nullable()
   })
 )
 
@@ -30,7 +29,8 @@ export const CreateValidatorForAssignSubject = vine.compile(
   
   vine.object ({
     division_id: vine.number(),
-    academic_session_id: vine.number(),
+    academic_year: vine.number().optional(),
+    academic_session_id: vine.number().optional(),
     subjects : vine.array(
       vine.object({
         // add here

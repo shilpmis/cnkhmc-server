@@ -23,7 +23,7 @@ export default class BenchmarkExport extends BaseCommand {
   async run() {
     const subjectId = 123
     const lpNumber = '1'
-    const academicSessionId = 33
+    const academicYear = 33
     const schoolId = 15
 
     this.logger.info('Starting Benchmark...')
@@ -32,7 +32,7 @@ export default class BenchmarkExport extends BaseCommand {
       console.time('1. LessonPlan query')
       const lp = await LessonPlan.query()
         .where('subject_id', subjectId)
-        .where('academic_session_id', academicSessionId)
+        .where('academic_year', academicYear)
         .where('school_id', schoolId)
         .preload('subject')
         .preload('school')
@@ -64,7 +64,7 @@ export default class BenchmarkExport extends BaseCommand {
         .first()
 
       const session = await db.from('academic_sessions')
-        .where('id', academicSessionId)
+        .where('id', academicYear)
         .first()
       console.timeEnd('4. Dept, Session & Div queries')
       this.logger.info(`Dept: ${department?.name}, Session: ${session?.name}`)
@@ -89,14 +89,14 @@ export default class BenchmarkExport extends BaseCommand {
       console.time('6. Student count query')
       const divMaster = await db.from('subjects_division_masters')
         .where('subject_id', subjectId)
-        .where('academic_session_id', academicSessionId)
+        .where('academic_year', academicYear)
         .first()
 
       let studentCount = 0
       if (divMaster) {
         const countRes = await db.from('student_enrollments')
           .where('division_id', divMaster.division_id)
-          .where('academic_session_id', academicSessionId)
+          .where('academic_year', academicYear)
           .count('* as total')
         studentCount = Number((countRes[0] as any).total || 0)
       }

@@ -92,7 +92,7 @@ export default class SchoolsController {
     let school = await Schools.query()
       .where('id', school_id)
       .preload('organization')
-      .preload('academicSessions')
+      // .preload('academicSessions')
       .first()
     
     if (school && entity && school.name !== entity.name) {

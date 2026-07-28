@@ -6,7 +6,7 @@ import vine from '@vinejs/vine'
 export const CreateValidatorForClasses = vine.compile(
   vine.object({
     class: vine.string().maxLength(255),
-    academic_session_id: vine.number().positive(),
+    academic_year: vine.number().positive(),
     batch_id: vine.number().positive().optional(),
     department_id: vine.number().positive().optional(),
     is_active: vine.boolean().optional(),
@@ -18,7 +18,7 @@ export const CreateValidatorForDivision = vine.compile(
     class_id: vine.number().positive(),
     division: vine.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']),
     aliases: vine.string().minLength(3).maxLength(20).optional(),
-    academic_session_id: vine.number().positive(),
+    academic_year: vine.number().positive(),
     is_active: vine.boolean().optional(),
   })
 )
@@ -28,7 +28,7 @@ export const CreateManyValidatorForClasses = vine.compile(
     .array(
       vine.object({
         class: vine.string().maxLength(255),
-        academic_session_id: vine.number().positive(),
+        academic_year: vine.number().positive(),
         batch_id: vine.number().positive().optional(),
         department_id: vine.number().positive().optional(),
         is_active: vine.boolean().optional(),

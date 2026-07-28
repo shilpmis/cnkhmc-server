@@ -1,7 +1,6 @@
 import Base from '#models/base'
-import { belongsTo, column, hasMany } from '@adonisjs/lucid/orm'
+import { belongsTo, column } from '@adonisjs/lucid/orm'
 import * as relations from '@adonisjs/lucid/types/relations'
-import AcademicSession from './AcademicSession.js'
 import Organization from '#models/Organization'
 export default class Schools extends Base {
 
@@ -21,6 +20,9 @@ export default class Schools extends Base {
 
      @column()
      declare established_year: string
+
+     @column()
+     declare enrollment_number_format: string | null
 
      @column()
      declare school_type: 'SCHOOL' | 'COLLEGE'
@@ -58,9 +60,6 @@ export default class Schools extends Base {
      })
      declare organization: relations.BelongsTo<typeof Organization>
 
-     @hasMany(() => AcademicSession, {
-        foreignKey: 'school_id',
-        localKey: 'id'  
-     })
-     declare academicSessions: relations.HasMany<typeof AcademicSession>
+     
+     
 }

@@ -1,4 +1,3 @@
-import AcademicSession from '#models/AcademicSession'
 import LeaveLog from '#models/LeaveLog'
 import LeavePolicies from '#models/LeavePolicies'
 import LeaveTypeMaster from '#models/LeaveTypeMaster'
@@ -24,22 +23,6 @@ import { v4 as uuidv4 } from 'uuid'
 export default class LeavesController {
   async indexLeaveTypesForSchool(ctx: HttpContext) {
     let school_id = ctx.auth.user!.school_id!
-    let academic_session_id = ctx.request.input('academic_session_id')
-
-    // Only validate academic session if ID is provided
-    if (academic_session_id) {
-      let academic_sesion = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('id', academic_session_id)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-
-      if (!academic_sesion) {
-        return ctx.response.status(404).json({
-          message: 'No active academic session found for your school !',
-        })
-      }
-    }
 
     if (ctx.request.input('page') == 'all') {
       let leave_types = await LeaveTypeMaster.query()
@@ -60,11 +43,11 @@ export default class LeavesController {
   async createLeaveTypeForSchool(ctx: HttpContext) {
     try {
       // Get user information
-      let school_id = ctx.auth.user!.school_id!
+      let school_id = ctx.auth.user!.school_id || ctx.request.input('school_id')
       let role_id = ctx.auth.user!.role_id
 
       // Authorization check
-      if (role_id !== 1) {
+      if (![1, 2, 3, 7, 8, 11].includes(role_id)) {
         return ctx.response.status(401).json({
           message: 'You are not authorized to create leave type for this school',
         })
@@ -73,29 +56,16 @@ export default class LeavesController {
       // Validate request payload
       let payload = await CreateValidatorForLeaveType.validate(ctx.request.body())
 
-      // Validate academic session
-      let academic_session = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('school_id', school_id)
-        .andWhere('id', payload.academic_session_id!)
-        .first()
-
-      if (!academic_session) {
-        return ctx.response.status(404).json({
-          message: 'No active academic session found for your school!',
-        })
-      }
-
-      // Check if leave type with same name already exists for this school and session
+      // Check if leave type with same name already exists for this school and year
       const existingLeaveType = await LeaveTypeMaster.query()
         .where('leave_type_name', payload.leave_type_name)
         .andWhere('school_id', school_id)
-        .andWhere('academic_session_id', payload.academic_session_id!)
+        .andWhere('academic_year', payload.academic_year!)
         .first()
 
       if (existingLeaveType) {
         return ctx.response.status(409).json({
-          message: 'A leave type with this name already exists for this school and academic session',
+          message: 'A leave type with this name already exists for this school and academic year',
         })
       }
 
@@ -109,7 +79,7 @@ export default class LeavesController {
       // Check for specific database unique constraint errors
       if (error.code === '23505' || error.message.includes('unique constraint')) {
         return ctx.response.status(409).json({
-          message: 'A leave type with this name already exists for this school and academic session',
+          message: 'A leave type with this name already exists for this school and academic year',
         })
       }
 
@@ -117,13 +87,13 @@ export default class LeavesController {
       console.error('Error creating leave type:', error)
       return ctx.response.status(500).json({
         message: 'Failed to create leave type',
-        error: process.env.NODE_ENV === 'production' ? undefined : error.message,
+        error: process.env.NODE_ENV === 'production' ? undefined : (error.messages || error.message || error),
       })
     }
   }
 
   async updateLeaveTypeForSchool(ctx: HttpContext) {
-    let school_id = ctx.auth.user!.school_id!
+    let school_id = ctx.auth.user!.school_id || ctx.request.input('school_id')
     let role_id = ctx.auth.user!.role_id
 
     if (role_id !== 1 && school_id !== ctx.auth.user?.school_id!) {
@@ -140,23 +110,6 @@ export default class LeavesController {
     if (!leave_type) {
       return ctx.response.status(404).json({
         message: 'This leave type is not available for your school',
-      })
-    }
-
-    let academic_sesion = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_sesion) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for your school !',
-      })
-    }
-
-    if (academic_sesion.id != leave_type.academic_session_id) {
-      return ctx.response.status(404).json({
-        message: 'Active academic session is not same as leave type academic session !',
       })
     }
 
@@ -179,7 +132,7 @@ export default class LeavesController {
 
   async indexLeavePolicyForUser(ctx: HttpContext) {
     let staff_id = ctx.auth.user!.staff_id
-    let academic_session_id = ctx.request.input('academic_session_id')
+    let academic_year = ctx.request.input('academic_year')
 
     console.log('[DEBUG indexLeavePolicyForUser]', {
       auth_user: ctx.auth.user ? {
@@ -188,25 +141,11 @@ export default class LeavesController {
         staff_id: ctx.auth.user.staff_id,
         role_id: ctx.auth.user.role_id,
       } : null,
-      academic_session_id,
+      academic_year,
     })
 
-    if (!academic_session_id || academic_session_id === 'undefined') {
-      console.log('[DEBUG indexLeavePolicyForUser] Missing or undefined academic_session_id')
-      return ctx.response.status(200).json([])
-    }
-
-    let academic_sesion = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('id', academic_session_id)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_sesion) {
-      console.log('[DEBUG indexLeavePolicyForUser] Academic session NOT found or not active or school_id mismatch:', {
-        academic_session_id,
-        school_id: ctx.auth.user!.school_id!
-      })
+    if (!academic_year || academic_year === 'undefined') {
+      console.log('[DEBUG indexLeavePolicyForUser] Missing or undefined academic_year')
       return ctx.response.status(200).json([])
     }
 
@@ -227,15 +166,10 @@ export default class LeavesController {
       .preload('staff_role')
       .where('staff_role_id', staff.staff_role_id)
       .andWhere('school_id', ctx.auth.user!.school_id!)
-      .andWhere('academic_session_id', academic_session_id)
+      .andWhere('academic_year', academic_year)
       .orderBy('id', 'desc')
 
-    if (!academic_session_id) {
-      return ctx.response.status(400).json({
-        message: 'Academic session ID is required',
-      })
-    }
-    const leaveBalances = await this.getStaffLeaveBalances(Number(staff_id), academic_session_id)
+    const leaveBalances = await this.getStaffLeaveBalances(Number(staff_id), academic_year)
 
     // Combine policies with their balances
     const result = leave_policies.map(policy => {
@@ -258,7 +192,7 @@ export default class LeavesController {
   async createLeavePolicyForSchool(ctx: HttpContext) {
     let role_id = ctx.auth.user!.role_id
 
-    if (role_id !== 1) {
+    if (![1, 2, 3, 7, 8, 11].includes(role_id)) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to create leave type for this school',
       })
@@ -266,21 +200,11 @@ export default class LeavesController {
 
     let payload = await CreateValidatorForLeavePolicies.validate(ctx.request.body())
 
-    let academic_sesion = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .andWhere('id', payload.academic_session_id as number)
-      .first()
-
-    if (!academic_sesion) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for your school !',
-      })
-    }
+    let school_id = ctx.auth.user!.school_id || ctx.request.input('school_id')
 
     let leave_type = await LeaveTypeMaster.query()
       .where('id', payload.leave_type_id)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+      .andWhere('school_id', school_id)
       .first()
 
     if (!leave_type) {
@@ -289,7 +213,7 @@ export default class LeavesController {
       })
     }
 
-    let leave = await LeavePolicies.create({ ...payload, school_id: ctx.auth.user!.school_id! })
+    let leave = await LeavePolicies.create({ ...payload, school_id: school_id })
 
     return ctx.response.status(200).json(leave)
   }
@@ -319,18 +243,6 @@ export default class LeavesController {
     if (!validate_leave) {
       return ctx.response.status(401).json({
         message: 'This leave policy is not available for your school',
-      })
-    }
-
-    let academic_sesion = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('id', validate_leave.academic_session_id!)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_sesion) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for your school !',
       })
     }
 
@@ -503,18 +415,6 @@ export default class LeavesController {
     try {
       let payload = await CreateValidatorForLeaveApplication.validate(ctx.request.body())
 
-      let academic_sesion = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .andWhere('id', payload.academic_session_id!)
-        .first()
-
-      if (!academic_sesion) {
-        return ctx.response.status(404).json({
-          message: 'No active academic session found for your school !',
-        })
-      }
-
       // Check if applying for self or on behalf of another staff member
       let targetStaffId = payload.staff_id
       const userRole = ctx.auth.user!.role_id
@@ -548,9 +448,10 @@ export default class LeavesController {
         }
       }
 
+      let school_id = ctx.auth.user!.school_id || ctx.request.input('school_id')
       let staff = await Staff.query()
         .where('id', targetStaffId)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
+        .andWhere('school_id', school_id)
         .first()
 
       if (!staff) {
@@ -561,7 +462,7 @@ export default class LeavesController {
 
       let leave_type = await LeaveTypeMaster.query()
         .where('id', payload.leave_type_id)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
+        .andWhere('school_id', school_id)
         .first()
 
       if (!leave_type) {
@@ -575,7 +476,7 @@ export default class LeavesController {
         .preload('staff_role')
         .where('staff_role_id', staff.staff_role_id)
         .andWhere('leave_type_id', payload.leave_type_id)
-        .andWhere('academic_session_id', payload.academic_session_id!)
+        .andWhere('academic_year', payload.academic_year!)
         .first()
 
       if (!leavePolicy) {
@@ -596,7 +497,7 @@ export default class LeavesController {
       const leaveBalance = await StaffLeaveBalance.query()
         .where('staff_id', targetStaffId)
         .andWhere('leave_type_id', payload.leave_type_id)
-        .andWhere('academic_session_id', payload.academic_session_id!)
+        .andWhere('academic_year', payload.academic_year!)
         .orderBy('id', 'desc')  // Get the most recent balance record
         .first()
 
@@ -640,8 +541,7 @@ export default class LeavesController {
           await StaffLeaveBalance.create({
             staff_id: targetStaffId,
             leave_type_id: payload.leave_type_id,
-            academic_session_id: payload.academic_session_id!,
-            academic_year: currentYear,
+            academic_year: payload.academic_year!,
             total_leaves: leavePolicy.annual_quota,
             used_leaves: 0,
             pending_leaves: numberOfDays,
@@ -713,17 +613,11 @@ export default class LeavesController {
       // Store the original number of days for balance calculation
       originalNumberOfDays = application.number_of_days
 
-      // Verify the academic session
-      let academic_session = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('id', application.academic_session_id as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-
-      if (!academic_session) {
+      // Verify the academic year
+      if (!application.academic_year) {
         await trx.rollback()
         return ctx.response.status(404).json({
-          message: 'No active academic session found for your school !',
+          message: 'No academic year set on this leave application !',
         })
       }
 
@@ -751,7 +645,7 @@ export default class LeavesController {
         .preload('staff_role')
         .where('staff_role_id', staff.staff_role_id)
         .andWhere('leave_type_id', leave_type_id)
-        .andWhere('academic_session_id', academic_session.id)
+        .andWhere('academic_year', application.academic_year)
         .first()
 
       if (!leave_policy) {
@@ -779,7 +673,7 @@ export default class LeavesController {
       const leaveBalance = await StaffLeaveBalance.query()
         .where('staff_id', application.staff_id)
         .andWhere('leave_type_id', leave_type_id)
-        .andWhere('academic_session_id', application.academic_session_id!)
+        .andWhere('academic_year', application.academic_year)
         .orderBy('id', 'desc')
         .first()
 
@@ -841,19 +735,13 @@ export default class LeavesController {
   async fetchLeaveApplication(ctx: HttpContext) {
     let staff_id = ctx.params.staff_id
     let status = ctx.request.input('status', 'pending')
-    let academic_session_id = ctx.request.input('academic_session_id')
+    let academic_year = ctx.request.input('academic_year')
     const date = ctx.request.input('date', null)
     const today = new Date().toISOString().split('T')[0]
 
-    let academic_sesion = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('id', academic_session_id)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_sesion) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for your school !',
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'academic_year is required',
       })
     }
 
@@ -894,7 +782,7 @@ export default class LeavesController {
         .join('leave_types_master', 'leave_types_master.id', 'staff_leave_applications.leave_type_id')
         .where('staff.school_id', ctx.auth.user!.school_id!)
         .andWhere('staff_leave_applications.staff_id', staff_id)
-        .andWhere('staff_leave_applications.academic_session_id', academic_sesion.id);
+        .andWhere('staff_leave_applications.academic_year', academic_year);
 
       // Apply status filter if not 'all'
       if (status && status !== 'all') {
@@ -930,17 +818,11 @@ export default class LeavesController {
     const today = new Date().toISOString().split('T')[0]
     // const search_term = ctx.request.input('search', '')
 
-    let academic_session_id = ctx.request.input('academic_session_id')
+    let academic_year = ctx.request.input('academic_year')
 
-    let academic_sesion = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('id', academic_session_id)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_sesion) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for your school !',
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'academic_year is required',
       })
     }
 
@@ -950,6 +832,7 @@ export default class LeavesController {
         'staff_leave_applications.uuid',
         // 'staff_leave_applications.staff_id',
         'staff_leave_applications.leave_type_id',
+        'staff_leave_applications.academic_year as academic_session_id',
         'staff_leave_applications.approved_by',
         'staff_leave_applications.from_date',
         'staff_leave_applications.to_date',
@@ -975,7 +858,7 @@ export default class LeavesController {
       .where('staff.school_id', ctx.auth.user!.school_id as number)
       .andWhere('staff.is_active', true)
       .andWhere('staff_role_master.is_teaching_role', staff_type === 'teaching')
-      .andWhere('staff_leave_applications.academic_session_id', academic_sesion.id);
+      .andWhere('staff_leave_applications.academic_year', academic_year);
 
     // Apply role-based visibility rules
     const userRole = ctx.auth.user!.role_id
@@ -1007,28 +890,24 @@ export default class LeavesController {
       }
     }
 
-    const paginatedResults = await query.paginate(page, 6);
-
-    return ctx.response.status(200).json(paginatedResults)
+    try {
+      const paginatedResults = await query.paginate(page, 6);
+      return ctx.response.status(200).json(paginatedResults)
+    } catch (error: any) {
+      console.error("QUERY ERROR:", error)
+      return ctx.response.status(500).json({
+        message: 'Internal Server Error',
+        error: error.message,
+        stack: error.stack
+      })
+    }
   }
 
   async approveTeachersLeaveApplication(ctx: HttpContext) {
     const leave_application_id = ctx.params.uuid
 
-    let academic_Session = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_Session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for your school !',
-      })
-    }
-
     const leave_application = await StaffLeaveApplication.query()
       .where('uuid', leave_application_id)
-      .andWhere('academic_session_id', academic_Session.id)
       .first()
 
     if (!leave_application) {
@@ -1053,6 +932,7 @@ export default class LeavesController {
     const applicantRole = staff.staff_role_id
 
     let isAuthorized = false
+    const adminRoles = [1, 7, 8, 11]; // Includes Admin, SuperAdmin, etc.
 
     // Hierarchy Rules:
     // 1. Teacher (Role 6) -> HOD (Role 9), Principal (Role 2), Admin (Role 1)
@@ -1060,15 +940,17 @@ export default class LeavesController {
     // 3. Principal (Role 2) -> Admin (Role 1)
     // 4. Others (Clerks, etc.) -> Admin, Principal
 
-    if (applicantRole === 6) { // Teacher
-      if ([1, 2, 9].includes(approverRole)) isAuthorized = true // Admin, Principal, HOD
+    if (adminRoles.includes(approverRole)) {
+      isAuthorized = true; // Admins can approve anything
+    } else if (applicantRole === 6) { // Teacher
+      if ([2, 9].includes(approverRole)) isAuthorized = true // Principal, HOD
     } else if (applicantRole === 9) { // HOD
-      if ([1, 2].includes(approverRole)) isAuthorized = true // Admin, Principal
+      if ([2].includes(approverRole)) isAuthorized = true // Principal
     } else if (applicantRole === 2) { // Principal
-      if (approverRole === 1) isAuthorized = true // Admin only
+      // Already covered by adminRoles check above
     } else {
-      // For other roles, Admin and Principal can approve
-      if ([1, 2].includes(approverRole)) isAuthorized = true
+      // For other roles, Principal can approve
+      if ([2].includes(approverRole)) isAuthorized = true
     }
 
     if (!isAuthorized) {
@@ -1092,7 +974,7 @@ export default class LeavesController {
       const originalBalance = await StaffLeaveBalance.query()
         .where('staff_id', leave_application.staff_id)
         .andWhere('leave_type_id', leave_application.leave_type_id)
-        .andWhere('academic_session_id', leave_application.academic_session_id!)
+        .andWhere('academic_year', leave_application.academic_year)
         .orderBy('id', 'desc')
         .first()
 
@@ -1107,7 +989,7 @@ export default class LeavesController {
       const leaveBalance = await StaffLeaveBalance.query()
         .where('staff_id', leave_application.staff_id)
         .andWhere('leave_type_id', leave_application.leave_type_id)
-        .andWhere('academic_session_id', leave_application.academic_session_id!)
+        .andWhere('academic_year', leave_application.academic_year)
         .orderBy('id', 'desc')
         .first()
 
@@ -1210,22 +1092,22 @@ export default class LeavesController {
     }
   }
 
-  async getStaffLeaveBalances(staffId: number, academicSessionId: number) {
+  async getStaffLeaveBalances(staffId: number, academicYear: number) {
     // Get all leave balances for the staff
     const leaveBalances = await StaffLeaveBalance.query()
       .where('staff_id', staffId)
-      .andWhere('academic_session_id', academicSessionId)
+      .andWhere('academic_year', academicYear)
 
     return leaveBalances
   }
 
   async fetchStaffLeaveBalances(ctx: HttpContext) {
     const staffId = ctx.params.staff_id
-    const academicSessionId = ctx.request.input('academic_session_id')
+    const academicYear = ctx.request.input('academic_year')
 
-    if (!academicSessionId) {
+    if (!academicYear) {
       return ctx.response.status(400).json({
-        message: 'Academic session ID is required',
+        message: 'academic_year is required',
       })
     }
 
@@ -1245,11 +1127,11 @@ export default class LeavesController {
     const leavePolicies = await LeavePolicies.query()
       .preload('leave_type')
       .where('staff_role_id', staff.staff_role_id)
-      .andWhere('academic_session_id', academicSessionId)
+      .andWhere('academic_year', academicYear)
       .andWhere('school_id', ctx.auth.user!.school_id!)
 
     // Get all leave balances for the staff
-    const leaveBalances = await this.getStaffLeaveBalances(staffId, academicSessionId)
+    const leaveBalances = await this.getStaffLeaveBalances(staffId, academicYear)
 
     // Combine policies with their balances
     const result = leavePolicies.map(policy => {
@@ -1324,48 +1206,31 @@ export default class LeavesController {
     }
   }
 
-  // Method to carry forward leaves at the end of academic session
+  // Method to carry forward leaves at the end of academic year
   async processLeaveCarryForward(ctx: HttpContext) {
     // Only admin can process leave carry-forward
-    if (ctx.auth.user!.role_id !== 1) {
+    if (![1, 2, 3, 7, 8, 11].includes(ctx.auth.user!.role_id)) {
       return ctx.response.status(403).json({
         message: 'Only admin can process leave carry-forward',
       })
     }
 
-    const oldSessionId = ctx.request.input('old_session_id')
-    const newSessionId = ctx.request.input('new_session_id')
+    const oldYear = Number(ctx.request.input('old_year'))
+    const newYear = Number(ctx.request.input('new_year'))
 
-    if (!oldSessionId || !newSessionId) {
+    if (!oldYear || !newYear) {
       return ctx.response.status(400).json({
-        message: 'Both old and new session IDs are required',
+        message: 'Both old_year and new_year are required',
       })
     }
 
-    // Verify both sessions exist and belong to the school
-    const oldSession = await AcademicSession.query()
-      .where('id', oldSessionId)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    const newSession = await AcademicSession.query()
-      .where('id', newSessionId)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!oldSession || !newSession) {
-      return ctx.response.status(404).json({
-        message: 'One or both academic sessions not found',
-      })
-    }
-
-    // Get all leave balances from old session
+    // Get all leave balances from old year
     const oldBalances = await StaffLeaveBalance.query()
-      .where('academic_session_id', oldSessionId)
+      .where('academic_year', oldYear)
 
-    // Get all leave policies for new session
+    // Get all leave policies for new year
     const newPolicies = await LeavePolicies.query()
-      .where('academic_session_id', newSessionId)
+      .where('academic_year', newYear)
       .andWhere('can_carry_forward', true)
 
     const trx = await db.transaction()
@@ -1385,11 +1250,11 @@ export default class LeavesController {
           );
 
           if (carryAmount > 0) {
-            // Check if balance record already exists for new session
+            // Check if balance record already exists for new year
             const existingBalance = await StaffLeaveBalance.query()
               .where('staff_id', oldBalance.staff_id)
               .andWhere('leave_type_id', oldBalance.leave_type_id)
-              .andWhere('academic_session_id', newSessionId)
+              .andWhere('academic_year', newYear)
               .first()
 
             if (existingBalance) {
@@ -1403,15 +1268,11 @@ export default class LeavesController {
                 available_balance: availableBalance
               }).save()
             } else {
-              // Get the new academic year from the new session
-              const newYear = parseInt(newSession.end_year)
-
               // Create new balance
               await StaffLeaveBalance.create({
                 staff_id: oldBalance.staff_id,
                 leave_type_id: oldBalance.leave_type_id,
-                academic_session_id: newSessionId,
-                academic_year: newYear,  // Add academic year
+                academic_year: newYear,
                 total_leaves: policy.annual_quota + carryAmount,
                 carried_forward: carryAmount,
                 used_leaves: 0,
@@ -1452,7 +1313,7 @@ export default class LeavesController {
 
     // Check if user has permission to view logs
     const isOwner = ctx.auth.user!.staff_id === application.staff_id
-    const isAdmin = [1, 2, 3].includes(ctx.auth.user!.role_id)
+    const isAdmin = [1, 2, 3, 7, 8, 11].includes(ctx.auth.user!.role_id)
 
     if (!isOwner && !isAdmin) {
       return ctx.response.status(403).json({
@@ -1491,7 +1352,7 @@ export default class LeavesController {
 
     // Check if user is authorized to withdraw this leave
     const isStaffOwner = leaveApplication.staff_id === ctx.auth.user!.staff_id
-    const isAdmin = ctx.auth.user!.role_id === 1
+    const isAdmin = [1, 2, 3, 7, 8, 11].includes(ctx.auth.user!.role_id)
 
     if (!isStaffOwner && !isAdmin) {
       return ctx.response.status(403).json({
@@ -1523,7 +1384,7 @@ export default class LeavesController {
       const leaveBalance = await StaffLeaveBalance.query()
         .where('staff_id', leaveApplication.staff_id)
         .andWhere('leave_type_id', leaveApplication.leave_type_id)
-        .andWhere('academic_session_id', leaveApplication.academic_session_id!)
+        .andWhere('academic_year', leaveApplication.academic_year)
         .orderBy('id', 'desc')
         .first()
 

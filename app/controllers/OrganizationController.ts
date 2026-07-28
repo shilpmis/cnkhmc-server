@@ -205,19 +205,19 @@ export default class OrganizationController {
         // Fetch classes for these sessions
         const classes = await db.from('classes')
           .useTransaction(trx)
-          .whereIn('academic_session_id', sessionIds.length > 0 ? sessionIds : [0])
+          .whereIn('academic_year', sessionIds.length > 0 ? sessionIds : [0])
         const classIds = classes.map(c => c.id)
 
         // Fetch divisions for these sessions
         const divisions = await db.from('divisions')
           .useTransaction(trx)
-          .whereIn('academic_session_id', sessionIds.length > 0 ? sessionIds : [0])
+          .whereIn('academic_year', sessionIds.length > 0 ? sessionIds : [0])
         const divisionIds = divisions.map(d => d.id)
 
         // Fetch subjects division masters for these sessions
         const subjectsDivisions = await db.from('subjects_division_masters')
           .useTransaction(trx)
-          .whereIn('academic_session_id', sessionIds.length > 0 ? sessionIds : [0])
+          .whereIn('academic_year', sessionIds.length > 0 ? sessionIds : [0])
         const subjectsDivisionIds = subjectsDivisions.map(sd => sd.id)
 
         // A. Delete staff attendance edit requests (references users via actioned_by / requested_by)
@@ -229,11 +229,11 @@ export default class OrganizationController {
             .delete()
         }
 
-        // B. Delete staff attendance masters (references users via marked_by and sessions via academic_session_id)
+        // B. Delete staff attendance masters (references users via marked_by and sessions via academic_year)
         if (sessionIds.length > 0) {
           await db.from('staff_attendance_masters')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
         }
         if (userIds.length > 0) {
@@ -293,7 +293,7 @@ export default class OrganizationController {
         if (sessionIds.length > 0) {
           const apps = await db.from('staff_leave_applications')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .select('id')
           applicationIds = apps.map(a => a.id)
         }
@@ -307,12 +307,12 @@ export default class OrganizationController {
         if (sessionIds.length > 0) {
           await db.from('staff_leave_applications')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
 
           await db.from('staff_leave_balances')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
         }
 
@@ -337,12 +337,12 @@ export default class OrganizationController {
         if (sessionIds.length > 0) {
           await db.from('student_fees_master')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
 
           await db.from('fees_plans')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
         }
 
@@ -350,7 +350,7 @@ export default class OrganizationController {
         if (sessionIds.length > 0) {
           await db.from('subjects_division_masters')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
         }
 
@@ -358,7 +358,7 @@ export default class OrganizationController {
         if (sessionIds.length > 0) {
           await db.from('school_timetable_config')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
         }
 
@@ -366,7 +366,7 @@ export default class OrganizationController {
         if (sessionIds.length > 0) {
           await db.from('divisions')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
         }
 
@@ -374,7 +374,7 @@ export default class OrganizationController {
         if (sessionIds.length > 0) {
           await db.from('classes')
             .useTransaction(trx)
-            .whereIn('academic_session_id', sessionIds)
+            .whereIn('academic_year', sessionIds)
             .delete()
         }
 
@@ -557,7 +557,7 @@ export default class OrganizationController {
       } 
       else if (data.type === 'SCHOOL' && data.config?.classes) {
         for (const className of data.config.classes) {
-           // Assumes academic_session_id will be linked later or isn't strictly required on insert
+           // Assumes academic_year will be linked later or isn't strictly required on insert
            await Classes.create({
               school_id: entity.id,
               class: className,

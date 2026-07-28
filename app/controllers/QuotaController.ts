@@ -5,9 +5,9 @@ export default class QuotasController {
   public async createQuotaForSeats(ctx: HttpContext) {
     try {
       const school_id = ctx.auth.user?.school_id
-      const academic_session_id = ctx.request.qs().academic_session
+      const academic_year = ctx.request.qs().academic_session
       const data = ctx.request.only(['name', 'description', 'eligibility_criteria', 'is_active'])
-      const quota = await Quota.create({ ...data, school_id: school_id as number, academic_session_id })
+      const quota = await Quota.create({ ...data, school_id: school_id as number, academic_year })
       return ctx.response.created(quota)
     } catch (error) {
       console.log('error while creating quota', error)
@@ -22,7 +22,7 @@ export default class QuotasController {
 
     return await Quota.query()
       .where('school_id', ctx.auth.user!.school_id as number)
-      .andWhere('academic_session_id', ctx.request.qs().academic_session)
+      .andWhere('academic_year', ctx.request.qs().academic_session)
   }
 
   public async delete({ params, response }: HttpContext) {

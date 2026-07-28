@@ -7,12 +7,10 @@ export default class extends BaseSchema {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
       table.integer('student_id').unsigned().references('id').inTable('students').onDelete('CASCADE')
-      table.integer('academic_session_id')
+      table.integer('academic_year').notNullable()
       .unsigned()
       .notNullable()
-      .references('id')
-      .inTable('academic_sessions')
-      .onDelete('CASCADE');
+      ;
       table.integer('fees_plan_id').unsigned().references('id').inTable('fees_plans').onDelete('CASCADE')
       table.decimal('total_amount', 10, 2).notNullable().defaultTo(0)
       table.decimal('discounted_amount', 10, 2).nullable().defaultTo(0) //-- After applying concessions
@@ -22,7 +20,7 @@ export default class extends BaseSchema {
       table.timestamp('created_at')
       table.timestamp('updated_at')
 
-      table.unique(['student_id', 'academic_session_id', 'fees_plan_id'] , 'student_fees_master_unique')
+      table.unique(['student_id', 'academic_year', 'fees_plan_id'] , 'student_fees_master_unique')
     })
   }
 

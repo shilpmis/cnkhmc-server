@@ -6,10 +6,8 @@ export default class extends BaseSchema {
   async up() {
     this.schema.alterTable(this.tableName, (table) => {
       table
-        .foreign('academic_session_id', 'fk_academic_session_id')
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
+        .foreign('academic_year', 'fk_academic_year')
+        
 
       table
         .foreign('division_id', 'fk_division_id')
@@ -21,7 +19,7 @@ export default class extends BaseSchema {
 
   async down() {
     this.schema.alterTable(this.tableName, (table) => {
-      table.dropForeign('academic_session_id', 'fk_academic_session_id')
+      // table.dropForeign('academic_year')
       table.dropForeign('division_id', 'fk_division_id')
     })
   }

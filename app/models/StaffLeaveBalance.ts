@@ -3,7 +3,6 @@ import { belongsTo, column } from '@adonisjs/lucid/orm'
 import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Staff from './Staff.js'
 import LeaveTypeMaster from './LeaveTypeMaster.js'
-import AcademicSession from './AcademicSession.js'
 
 export default class StaffLeaveBalance extends Base {
   @column()
@@ -13,10 +12,9 @@ export default class StaffLeaveBalance extends Base {
   declare leave_type_id: number
 
   @column()
-  declare academic_session_id: number
-
-  @column()
   declare academic_year: number
+
+
 
   @column()
   declare total_leaves: number
@@ -45,9 +43,6 @@ export default class StaffLeaveBalance extends Base {
   })
   declare leave_type: BelongsTo<typeof LeaveTypeMaster>
 
-  @belongsTo(() => AcademicSession, {
-    localKey: 'id',
-    foreignKey: 'academic_session_id',
-  })
-  declare academic_session: BelongsTo<typeof AcademicSession>
+  
+  
 }

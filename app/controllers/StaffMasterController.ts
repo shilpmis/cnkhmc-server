@@ -1,4 +1,3 @@
-import AcademicSession from '#models/AcademicSession';
 import OtherStaffMaster from '#models/OtherStaff';
 import StaffMaster from '#models/StaffMaster';
 import Teacher from '#models/Teacher';
@@ -38,19 +37,15 @@ export default class StaffMasterController {
     async createStaffRole(ctx: HttpContext) {
 
         let school_id = ctx.auth.user!.school_id;
-        const academic_session_id = ctx.request.input('academic_session');
+        const academic_year = ctx.request.input('academic_session');
 
-        if (!academic_session_id) {
+        if (!academic_year) {
             return ctx.response.status(400).json({ message: 'Please provide academic session id.' });
         }
 
-        let academic_session = await AcademicSession.query().where('id', academic_session_id as number).andWhere('school_id', school_id as number).first();
+        // Session check removed
 
-        if (!academic_session) {
-            return ctx.response.status(404).json({ message: 'Academic session not found.' });
-        }
-
-        if (ctx.auth.user?.role_id !== 1) {
+        if (![1, 8].includes(ctx.auth.user?.role_id as number)) {
             return ctx.response.status(403).json({ message: 'You are not allocated to manage this functions.' });
         }
         const payload = await CreateValidatorForStaffRole.validate(ctx.request.body());
@@ -58,14 +53,14 @@ export default class StaffMasterController {
             ...payload, 
             school_id: school_id as number,
             permissions: {},
-            academic_session_id: academic_session_id as number
+            academic_year: academic_year as number
          });
         return ctx.response.json(created_class.serialize());
     }
 
     async updateStaffRole(ctx: HttpContext) {
         // let school_id = ctx.auth.user?.school_id
-        if (ctx.auth.user?.role_id !== 1) {
+        if (![1, 8].includes(ctx.auth.user?.role_id as number)) {
             return ctx.response.status(403).json({ message: 'You are not allocated to manage this functions.' });
         }
         const payload = await UpdateValidatorForStaffRole.validate(ctx.request.body());
@@ -78,7 +73,7 @@ export default class StaffMasterController {
     async deleteStaffRole(ctx: HttpContext) {
 
         const school_id = ctx.auth.user?.school_id
-        if (ctx.auth.user?.role_id !== 1) {
+        if (![1, 8].includes(ctx.auth.user?.role_id as number)) {
             return ctx.response.status(403).json({ message: 'You are not allocated to manage this functions.' });
         }
         const staff_to_delete = await StaffMaster.findOrFail(ctx.params.id);

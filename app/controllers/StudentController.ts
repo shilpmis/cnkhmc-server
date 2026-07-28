@@ -2,8 +2,7 @@ import Classes from '#models/Classes'
 import type { HttpContext } from '@adonisjs/core/http'
 import {
   CreateValidatorForMultipleStundets,
-  // CreateValidatorForUpload,
-  // CreateValidatorForUpload,
+  CreateValidatorForUpload,
   CreateValidatorStundet,
   UpdateValidatorForStundets,
 } from '#validators/Students'
@@ -15,46 +14,84 @@ import path from 'path'
 import app from '@adonisjs/core/services/app'
 import ExcelJS from 'exceljs'
 import StudentEnrollments from '#models/StudentEnrollments'
-import AcademicSession from '#models/AcademicSession'
 import Schools from '#models/Schools'
 import Divisions from '#models/Divisions'
 
 // Helper function to generate unique enrollment codes
-interface GenerateUniqueEnrollmentCodeParams {
-  prefix: string
+export interface GenerateUniqueEnrollmentCodeParams {
+  school_id: number
   trx: any // Replace `any` with the specific type for the transaction object if available
 }
 
-async function generateUniqueEnrollmentCode({
-  prefix,
+export async function generateUniqueEnrollmentCode({
+  school_id,
   trx,
 }: GenerateUniqueEnrollmentCodeParams): Promise<string> {
-  const maxAttempts = 10
-  let attempts = 0
+  const school = await Schools.query({ client: trx }).where('id', school_id).first()
+  let format = school?.enrollment_number_format
 
-  while (attempts < maxAttempts) {
-    // Generate a random code
-    const randomPart = Math.floor(1000 + Math.random() * 9000)
-    const enrollmentCode = `${prefix}${randomPart}`
+  if (!format) {
+    // Fallback if no format is provided
+    const maxAttempts = 10
+    let attempts = 0
+    let prefix = 'ENR'
 
-    // Check if this code already exists in the database
-    const existingStudent = await Students.query({ client: trx })
-      .where('enrollment_code', enrollmentCode)
-      .first()
-
-    // If no student has this code, return it
-    if (!existingStudent) {
-      return enrollmentCode
+    while (attempts < maxAttempts) {
+      const randomPart = Math.floor(1000 + Math.random() * 9000)
+      const enrollmentCode = `${prefix}${randomPart}`
+      const existingStudent = await Students.query({ client: trx }).where('enrollment_code', enrollmentCode).first()
+      if (!existingStudent) return enrollmentCode
+      attempts++
     }
 
-    attempts++
+    const timestamp = Date.now().toString().slice(-5)
+    const randomPart = Math.floor(1000 + Math.random() * 9000)
+    return `${prefix}${timestamp}${randomPart}`
   }
 
-  // If we've tried multiple times and still have collisions,
-  // use timestamp + random to ensure uniqueness
+  const currentYear = new Date().getFullYear()
+  const year4 = currentYear.toString()
+  const year2 = year4.slice(-2)
+
+  let codePrefix = format.replace(/{YYYY}/g, year4).replace(/{YY}/g, year2)
+
+  if (codePrefix.includes('{SEQ}')) {
+    const prefixBeforeSeq = codePrefix.split('{SEQ}')[0]
+    
+    // Find the highest sequence number used for this prefix
+    const latestStudent = await Students.query({ client: trx })
+      .where('enrollment_code', 'LIKE', `${prefixBeforeSeq}%`)
+      .orderBy('enrollment_code', 'desc')
+      .first()
+    
+    let nextSeq = 1
+    if (latestStudent && latestStudent.enrollment_code) {
+      // Extract the sequence number part assuming {SEQ} is at the end or followed by fixed text
+      // E.g., if format is ABC-{SEQ}, and we have ABC-0004
+      const match = latestStudent.enrollment_code.substring(prefixBeforeSeq.length).match(/^(\d+)/)
+      if (match) {
+         nextSeq = parseInt(match[1], 10) + 1
+      }
+    }
+    
+    const seqString = nextSeq.toString().padStart(4, '0') // 4 digit padding
+    return codePrefix.replace(/{SEQ}/g, seqString)
+  }
+
+  // If no {SEQ} in format, append random numbers to ensure uniqueness
+  const maxAttempts = 10
+  let attempts = 0
+  while (attempts < maxAttempts) {
+    const randomPart = Math.floor(1000 + Math.random() * 9000)
+    const enrollmentCode = `${codePrefix}${randomPart}`
+    const existingStudent = await Students.query({ client: trx }).where('enrollment_code', enrollmentCode).first()
+    if (!existingStudent) return enrollmentCode
+    attempts++
+  }
+  
   const timestamp = Date.now().toString().slice(-5)
   const randomPart = Math.floor(1000 + Math.random() * 9000)
-  return `${prefix}${timestamp}${randomPart}`
+  return `${codePrefix}${timestamp}${randomPart}`
 }
 
 function parseAndFormatDate(dateStr: any): string | null {
@@ -69,7 +106,12 @@ function parseAndFormatDate(dateStr: any): string | null {
   if (str === '' || str.toLowerCase() === 'null') return null
 
   // Match YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const parsedStr = new Date(str)
+    if (!isNaN(parsedStr.getTime()) && parsedStr.toISOString().split('T')[0] === str) {
+      return str
+    }
+  }
 
   // Match DD-MM-YYYY or MM-DD-YYYY or DD/MM/YYYY or MM/DD/YYYY
   const parts = str.split(/[-/.]/)
@@ -78,16 +120,23 @@ function parseAndFormatDate(dateStr: any): string | null {
     let dayOrMonth2 = parseInt(parts[1], 10)
     let year = parseInt(parts[2], 10)
 
-    if (parts[2].length === 2) {
-      year += year < 50 ? 2000 : 1900
-    }
+    if (!isNaN(dayOrMonth1) && !isNaN(dayOrMonth2) && !isNaN(year)) {
+      if (parts[2].length === 2) {
+        year += year < 50 ? 2000 : 1900
+      }
 
-    if (dayOrMonth2 > 12 && dayOrMonth1 <= 12) {
-      // Likely MM/DD/YYYY
-      return `${year}-${String(dayOrMonth1).padStart(2, '0')}-${String(dayOrMonth2).padStart(2, '0')}`
-    } else {
-      // Safely default to DD-MM-YYYY
-      return `${year}-${String(dayOrMonth2).padStart(2, '0')}-${String(dayOrMonth1).padStart(2, '0')}`
+      let candidateStr: string
+      if (dayOrMonth2 > 12 && dayOrMonth1 <= 12) {
+        // Likely MM/DD/YYYY
+        candidateStr = `${year}-${String(dayOrMonth1).padStart(2, '0')}-${String(dayOrMonth2).padStart(2, '0')}`
+      } else {
+        // Safely default to DD-MM-YYYY
+        candidateStr = `${year}-${String(dayOrMonth2).padStart(2, '0')}-${String(dayOrMonth1).padStart(2, '0')}`
+      }
+      const parsedCandidate = new Date(candidateStr)
+      if (!isNaN(parsedCandidate.getTime()) && parsedCandidate.toISOString().split('T')[0] === candidateStr) {
+        return candidateStr
+      }
     }
   }
 
@@ -150,10 +199,23 @@ function parseSafeBloodGroup(val: any): string | null {
   return null
 }
 
+function parseSafeCategory(val: any): any {
+  if (val === null || val === undefined || val === '') return null
+  let str = String(val).trim().toUpperCase()
+  if (!str || str === 'NULL') return null
+  
+  if (['OPEN', 'GENERAL', 'GEN'].includes(str) || str.includes('EWS')) return 'OPEN'
+  if (['ST', 'S.T.', 'SCHEDULED TRIBE'].includes(str)) return 'ST'
+  if (['SC', 'S.C.', 'SCHEDULED CASTE'].includes(str)) return 'SC'
+  if (['OBC', 'O.B.C.', 'SEBC', 'S.E.B.C.', 'BAXI PANCH', 'OTHER BACKWARD CLASS'].includes(str)) return 'OBC'
+  
+  return null
+}
+
 export default class StundetsController {
   async indexClassStudents(ctx: HttpContext) {
     const division_id = ctx.params.division_id
-    const academic_session_id = ctx.params.academic_session_id
+    const academic_year = ctx.params.academic_year
     const page = ctx.request.input('page', 1)
     const is_meta_req = ctx.request.input('student_meta', false) === 'true'
 
@@ -179,7 +241,7 @@ export default class StundetsController {
     try {
       let studentsQuery = await StudentEnrollments.query()
         .where('division_id', division_id)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
         .preload('student', (studentQuery) => {
           if (is_meta_req) {
             studentQuery.preload('student_meta')
@@ -226,24 +288,13 @@ export default class StundetsController {
         .json({ message: 'You are  not authorized to perform this action!' })
     }
 
-    let active_session = await AcademicSession.query()
-      .where('id', acadamic_session_id)
-      .andWhere('school_id', school_id as number)
-      .first()
-    
-    if(!active_session){
-      return ctx.response.status(404).json({ message: 'No active academic session found!' })
-    }
-
-    // if (!active_session) {
-    //   return ctx.response.status(404).json({ message: 'No active academic session found!' })
-    // }
+    // Session check removed
 
     try {
       // Fetch the student enrollment record
       const studentEnrollment = await StudentEnrollments.query()
         .where('student_id', student_id)
-        .andWhere('academic_session_id', acadamic_session_id)
+        .andWhere('academic_year', acadamic_session_id)
         .first()
 
       if (!studentEnrollment) {
@@ -269,24 +320,17 @@ export default class StundetsController {
 
   async fetchStudentInDetail(ctx: HttpContext) {
     let student_id = ctx.params.student_id
-    let academic_session_id = ctx.request.qs().academic_session
+    let academic_year = ctx.request.qs().academic_session
 
     if (!student_id) {
       return ctx.response.status(400).json({ message: 'Student ID is required' })
     }
 
-    if (!academic_session_id) {
+    if (!academic_year) {
       return ctx.response.status(400).json({ message: 'Academic session is required' })
     }
 
-    let academic_session = await AcademicSession.query()
-      .where('id', academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.status(404).json({ message: 'Academic session not found' })
-    }
+    // Session check removed
 
     let detailed_student_data = await StudentEnrollments.query()
       .preload('student', (studentQuery) => {
@@ -294,21 +338,21 @@ export default class StundetsController {
       })
       .preload('division', (divisionQuery) => {
         divisionQuery.preload('class')
-        // divisionQuery.where('academic_session_id', academic_session_id as number)
+        // divisionQuery.where('academic_year', academic_year as number)
       })
       .preload('fees_status', (feesStatusQuery) => {
         feesStatusQuery.preload('paid_fees')
-        feesStatusQuery.where('academic_session_id', academic_session_id as number)
+        feesStatusQuery.where('academic_year', academic_year as number)
       })
       .preload('provided_concession', (query) => {
         query.preload('fees_plan', (query) => {
-          query.where('academic_session_id', academic_session_id as number)
+          query.where('academic_year', academic_year as number)
         })
-        query.where('academic_session_id', academic_session_id as number)
+        query.where('academic_year', academic_year as number)
       })
-      //. where('academic_session_id', academic_session_id)
+      //. where('academic_year', academic_year)
       .where('student_id', student_id)
-      .andWhere('academic_session_id', academic_session_id as number)
+      .andWhere('academic_year', academic_year as number)
       .first()
 
     if (!detailed_student_data) {
@@ -318,17 +362,12 @@ export default class StundetsController {
   }
 
   async createSingleStudent(ctx: HttpContext) {
-    const academic_session_id = ctx.request.qs().academic_session
+    console.log('--- Hit createSingleStudent ---')
+    console.log('User Role ID:', ctx.auth.user?.role_id)
+    const academic_year = ctx.request.qs().academic_session
     const trx = await db.transaction()
     try {
-      const academicSession = await AcademicSession.query()
-        .where('id', academic_session_id as number)
-        .andWhere('school_id', ctx.auth.user!.school_id as number)
-        .first()
-
-      if (!academicSession) {
-        return ctx.response.status(404).json({ message: 'Academic Session not found' })
-      }
+    // Session check removed
 
       let school_id = ctx.auth.user!.school_id
 
@@ -342,8 +381,10 @@ export default class StundetsController {
       if (!std) {
         return ctx.response.status(404).json({ message: 'Class not found.' })
       }
+      
+      console.log('Role check array includes?', [1, 2, 3, 4, 5, 8, 11].includes(Number(ctx.auth.user!.role_id)))
 
-      if (ctx.auth.user?.role_id != 1) {
+      if (![1, 2, 3, 4, 5, 8, 11].includes(Number(ctx.auth.user!.role_id))) {
         return ctx.response
           .status(401)
           .json({ message: 'You are not authorized to perform this action!' })
@@ -357,7 +398,6 @@ export default class StundetsController {
         {
           ...studentDataWithoutClassId,
           school_id: school_id as number,
-          enrollment_code: await generateUniqueEnrollmentCode({ prefix: 'ENR', trx }),
         } as any,
         { client: trx }
       )
@@ -373,7 +413,7 @@ export default class StundetsController {
         {
           student_id: student_data.id,
           division_id: class_id,
-          academic_session_id: academicSession.id,
+          academic_year: Number(academic_year),
           is_new_admission: true,
           status: 'pursuing',
           remarks: remarks || '',
@@ -408,7 +448,7 @@ export default class StundetsController {
 
     let std = await Classes.findOrFail(class_id)
 
-    if (std.school_id !== school_id || ctx.auth.user?.role_id !== 1) {
+    if (std.school_id !== school_id || ![1, 2, 3, 4, 5, 8, 11].includes(Number(ctx.auth.user!.role_id))) {
       return ctx.response
         .status(401)
         .json({ message: 'You are not authorized to perform this action!' })
@@ -426,7 +466,6 @@ export default class StundetsController {
           {
             ...payload[i].students_data,
             school_id: school_id as number,
-            enrollment_code: await generateUniqueEnrollmentCode({ prefix: 'ENR', trx }),
           } as any,
           { client: trx }
         )
@@ -528,28 +567,20 @@ export default class StundetsController {
   public async bulkUploadStudents(ctx: HttpContext) {
     const school_id = ctx.auth.user!.school_id
     const division_id = ctx.params.division_id
-    const academic_session_id = ctx.params.academic_session_id
+    const academic_year = ctx.params.academic_year
     const role_id = ctx.auth.user!.role_id
 
-    if (role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 8, 11].includes(Number(role_id))) {
       return ctx.response
-        .status(403)
-        .json({ message: 'You are not authorized to perform this action.' })
+        .status(401)
+        .json({ message: 'You are not authorized to perform this action!' })
     }
 
     if (!division_id) {
       return ctx.response.status(400).json({ message: 'Class ID is required.' })
     }
 
-    let check_ActiveSession = await AcademicSession.query()
-      .where('id', academic_session_id as number)
-      .andWhere('school_id', school_id as number)
-      .andWhere('is_active', true)
-      .first()
-
-    if (!check_ActiveSession) {
-      return ctx.response.status(400).json({ message: 'Academic session not found.' })
-    }
+    // Session check removed
 
     let school = await Schools.find(school_id)
 
@@ -590,6 +621,14 @@ export default class StundetsController {
     let validatedData = []
     let errors = []
 
+    let rollColumn: 'first_year_roll_number' | 'second_year_roll_number' | 'third_year_roll_number' | 'fourth_year_roll_number' | null = null
+    const className = classRecord.class.class.toLowerCase()
+    if (className.includes('1st') || className.includes('first') || className.includes('1')) rollColumn = 'first_year_roll_number'
+    else if (className.includes('2nd') || className.includes('second') || className.includes('2')) rollColumn = 'second_year_roll_number'
+    else if (className.includes('3rd') || className.includes('third') || className.includes('3')) rollColumn = 'third_year_roll_number'
+    else if (className.includes('4th') || className.includes('fourth') || className.includes('4')) rollColumn = 'fourth_year_roll_number'
+    else rollColumn = 'first_year_roll_number' // fallback
+
     for (const [index, data] of jsonData.entries()) {
       let transformedData
       if (isCollege) {
@@ -607,12 +646,13 @@ export default class StundetsController {
             middle_name_in_guj: data['S.LANGUAGE_MIDDLE_NAME'] || null,
             last_name_in_guj: data['S.LANGUAGE_LAST_NAME'] || null,
             birth_date: parseAndFormatDate(data['DATE_OF_BIRTH']),
-            roll_number: parseSafeInt(data['ROLL_NO']),
+            [rollColumn]: parseSafeInt(data['ROLL_NO']),
             father_name: data['FATHER_NAME'] || null,
             father_name_in_guj: data['S.LANGUAGE_Father Name'] || null,
             mother_name: data['MOTHER_NAME'] || null,
             mother_name_in_guj: data['S.LANGUAGE_Mother Name'] || null,
             aadhar_no: parseSafeAadhar(data['STUDENT_AADHAAR_CARDNO']),
+            enrollment_code: data['STUDENT_CODE'] || data['Enrollment Code'] || null,
             student_type: 'COLLEGE' as const,
           },
           student_meta_data: {
@@ -624,11 +664,12 @@ export default class StundetsController {
             religion_in_guj: data['Religion In Gujarati'] || null,
             caste: data['CASTE'] || data['Caste'] || null,
             caste_in_guj: data['Caste In Gujarati'] || null,
-            category: data['CATEGORY'] || null,
+            category: parseSafeCategory(data['CATEGORY'] || data['Category']),
             admission_date: parseAndFormatDate(data['ADMISSION_DATE']),
             secondary_mobile: parseSafeInt(data['MOBILE_NO2']),
             privious_school: data['PREVIOUS_SCHOOL_NAME'] || null,
             address: data['CURRENT ADDRESS'] || null,
+            district: data['Birth District'] || null,
 
             // New Address Details
             current_area: data['Current Area'] || null,
@@ -766,12 +807,13 @@ export default class StundetsController {
             middle_name_in_guj: data['Middle Name Gujarati'] || null,
             last_name_in_guj: data['Last Name Gujarati'] || null,
             birth_date: parseAndFormatDate(data['Date of Birth']),
-            roll_number: parseSafeInt(data['Roll Number']),
+            [rollColumn]: parseSafeInt(data['Roll Number']),
             father_name: data['Father Name'] || null,
             father_name_in_guj: data['Father Name in Gujarati'] || null,
             mother_name: data['Mother Name'] || null,
             mother_name_in_guj: data['Mother Name in Gujarati'] || null,
             aadhar_no: parseSafeAadhar(data['Aadhar No']),
+            enrollment_code: data['Enrollment Code'] || data['STUDENT_CODE'] || null,
             student_type: 'SCHOOL' as const,
           },
           student_meta_data: {
@@ -782,7 +824,7 @@ export default class StundetsController {
             religion_in_guj: data['Religion In Gujarati'] || null,
             caste: data['Caste'] || null,
             caste_in_guj: data['Caste In Gujarati'] || null,
-            category: data['Category'] || null,
+            category: parseSafeCategory(data['Category'] || data['CATEGORY']),
             admission_date: parseAndFormatDate(data['Admission Date']),
             admission_class_id: null,
             secondary_mobile: parseSafeInt(data['Other Mobile No']),
@@ -800,8 +842,8 @@ export default class StundetsController {
         }
       }
       try {
-        // const paylaod = await CreateValidatorForUpload.validate(transformedData)
-        validatedData.push(transformedData)
+        const payload = await CreateValidatorForUpload.validate(transformedData)
+        validatedData.push(payload)
       } catch (validationError) {
         errors.push({
           row: index + 1,
@@ -820,10 +862,6 @@ export default class StundetsController {
         const student_data = await Students.create(
           {
             ...validated_student.students_data,
-            enrollment_code: await generateUniqueEnrollmentCode({
-              prefix: school.branch_code,
-              trx,
-            }),
           } as any,
           { client: trx }
         )
@@ -840,7 +878,7 @@ export default class StundetsController {
           {
             student_id: student_data.id,
             division_id: division_id,
-            academic_session_id: academic_session_id as number,
+            academic_year: academic_year as number,
             status: 'pursuing',
             is_new_admission: false,
           },
@@ -866,20 +904,13 @@ export default class StundetsController {
     const { fields, export_all_divisions } = ctx.request.only(['fields', 'export_all_divisions'])
 
     const division_id = ctx.params.class_id
-    const academic_session_id = ctx.params.academic_session_id
+    const academic_year = ctx.params.academic_year
 
     if (!division_id || !fields) {
       return ctx.response.badRequest({ error: 'Class ID and fields are required' })
     }
 
-    let academic_session = await AcademicSession.query()
-      .where('id', academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.badRequest({ error: 'Academic session not found' })
-    }
+    // Session check removed
 
     let division = await Divisions.query()
       .preload('class', (query) => {
@@ -919,7 +950,7 @@ export default class StundetsController {
 
       class_students = await StudentEnrollments.query()
         .whereIn('division_id', divisionIds)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
         .preload('student', (studentQuery) => {
           studentQuery.preload('student_meta')
         })
@@ -927,7 +958,7 @@ export default class StundetsController {
       divisions = [division]
       class_students = await StudentEnrollments.query()
         .where('division_id', division_id)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
         .preload('student', (studentQuery) => {
           studentQuery.preload('student_meta')
         })

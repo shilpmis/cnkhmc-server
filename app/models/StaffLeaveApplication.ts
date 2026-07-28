@@ -14,7 +14,7 @@ export default class StaffLeaveApplication extends Base {
   declare staff_id: number
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare leave_type_id: number

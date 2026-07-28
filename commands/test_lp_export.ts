@@ -21,7 +21,7 @@ export default class TestLpExport extends BaseCommand {
     const token = await User.accessTokens.create(user)
     const tokenValue = token.value!.release()
 
-    const url = 'http://localhost:3333/api/v1/lesson-plans/export/132/1?academicSessionId=44'
+    const url = 'http://localhost:3333/api/v1/lesson-plans/export/132/1?academicYear=44'
     this.logger.info(`GET ${url}`)
 
     const response = await fetch(url, {

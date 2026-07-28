@@ -3,7 +3,7 @@ import vine from '@vinejs/vine'
 export const CreateValidatorForLeaveType = vine.compile(
   vine.object({
     leave_type_name: vine.string().trim().minLength(2).maxLength(25),
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     is_paid: vine.boolean(),
     affects_payroll: vine.boolean(),
     requires_proof: vine.boolean(),
@@ -23,7 +23,7 @@ export const UpdateValidatorForLeaveType = vine.compile(
 
 export const CreateValidatorForLeavePolicies = vine.compile(
   vine.object({
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     staff_role_id: vine.number(),
     leave_type_id: vine.number(),
     annual_quota: vine.number(),
@@ -65,10 +65,10 @@ export const CreateValidatorForOtherStaffsLeaveBalance = vine.compile(
 
 export const CreateValidatorForStaffLeaveBalance = vine.compile(
   vine.object({
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     teacher_id: vine.number(),
     leave_type_id: vine.number(),
-    academic_year: vine.number(),
+
     total_leaves: vine.number(),
     used_leaves: vine.number(),
     pending_leaves: vine.number(),
@@ -79,7 +79,7 @@ export const CreateValidatorForStaffLeaveBalance = vine.compile(
 
 export const CreateValidatorForLeaveApplication = vine.compile(
   vine.object({
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     staff_id: vine.number(),
     leave_type_id: vine.number(),
     from_date: vine.date(),
@@ -109,7 +109,7 @@ export const UpdateValidatorForLeaveApplication = vine.compile(
 export const ValidatorForApproveApplication = vine.compile(
   vine.object({
     status: vine.enum(['approved', 'rejected', 'cancelled']),
-    remarks: vine.string().trim().minLength(2).maxLength(200),
+    remarks: vine.string().trim().minLength(2).maxLength(200).optional(),
   })
 )
 

@@ -10,7 +10,7 @@ export const CreateValidatorForFeesType = vine.compile(
     name: vine.string().trim().minLength(2).maxLength(50),
     description: vine.string().trim().minLength(2).maxLength(50),
     applicable_to: vine.enum(['student', 'plan']),
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
   })
 )
 
@@ -27,7 +27,7 @@ export const UpdateValidatorForFeesType = vine.compile(
 
 export const CreateValidatorForFeesPlan = vine.compile(
   vine.object({
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     fees_plan: vine.object({
       name: vine.string().trim().minLength(2).maxLength(50).optional(),
       description: vine.string().trim().minLength(2).maxLength(50).optional(),
@@ -288,7 +288,7 @@ export const CreateValidationForConcessionType = vine.compile(
     applicable_to: vine.enum(['plan', 'students']),
     concessions_to: vine.enum(['plan', 'fees_type']),
     category: vine.enum(['family', 'sports', 'staff', 'education', 'financial', 'other']),
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
   })
 )
 
@@ -347,7 +347,7 @@ export const CreateValidationForApplyExtraFeesToStudent = vine.compile(
   vine.object({
 
     student_id: vine.number(),
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     fees_type_id: vine.number(),
     fees_plan_id: vine.number(),
     installment_type: vine.enum([

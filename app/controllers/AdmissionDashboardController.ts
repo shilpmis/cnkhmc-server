@@ -9,12 +9,12 @@ export default class AdmissionDashboardController {
       const schoolId = auth.user!.school_id
       if (!schoolId) return response.forbidden({ message: 'School ID missing' })
 
-      const academicSessionId = request.input('academic_session')
-      if (!academicSessionId) return response.badRequest({ message: 'Academic session missing' })
+      const academicYear = request.input('academic_session')
+      if (!academicYear) return response.badRequest({ message: 'Academic session missing' })
 
       const baseQuery = AdmissionInquiry.query()
         .where('school_id', schoolId)
-        .andWhere('academic_session_id', academicSessionId)
+        .andWhere('academic_year', academicYear)
       // Get total inquiries
       const totalInquiries = await baseQuery.clone().count('* as total')
 
@@ -62,13 +62,13 @@ export default class AdmissionDashboardController {
       const schoolId = auth.user!.school_id
       if (!schoolId) return response.forbidden({ message: 'School ID missing' })
 
-      const academicSessionId = request.input('academic_session')
-      if (!academicSessionId) return response.badRequest({ message: 'Academic session missing' })
+      const academicYear = request.input('academic_session')
+      if (!academicYear) return response.badRequest({ message: 'Academic session missing' })
 
       // Base query to filter by school if needed
       const baseQuery = AdmissionInquiry.query()
         .where('school_id', schoolId)
-        .andWhere('academic_session_id', academicSessionId)
+        .andWhere('academic_year', academicYear)
 
       // Get counts for each status
       const statusCounts = await baseQuery.select('status').count('* as count').groupBy('status')
@@ -101,7 +101,7 @@ export default class AdmissionDashboardController {
       // const baseQuery = db.query()
       //   .from('admission_inquiries as ai')
       //   .where('school_id', schoolId)
-      //   .andWhere('academic_session_id', request.input('academic_session'))
+      //   .andWhere('academic_year', request.input('academic_session'))
 
       // // Include class information in the query
       // const records = await baseQuery
@@ -109,8 +109,8 @@ export default class AdmissionDashboardController {
       //   .orderBy('created_at', period === 'month' ? 'desc' : 'asc')
       //   .limit(limit)
 
-      const academicSessionId = request.input('academic_session')
-      if (!academicSessionId) return response.badRequest({ message: 'Academic session missing' })
+      const academicYear = request.input('academic_session')
+      if (!academicYear) return response.badRequest({ message: 'Academic session missing' })
 
       const records = await db.query()
         .select('ai.created_at', 'ai.inquiry_for_class', 'c.class' , db.raw('count(*) as total'))
@@ -119,7 +119,7 @@ export default class AdmissionDashboardController {
         .groupBy('ai.created_at', 'ai.inquiry_for_class')
         .orderBy('ai.created_at', period === 'month' ? 'desc' : 'asc')
         .where('ai.school_id', schoolId!)
-        .andWhere('ai.academic_session_id', academicSessionId)
+        .andWhere('ai.academic_year', academicYear)
         .limit(limit)
 
       // Define types for our data structures

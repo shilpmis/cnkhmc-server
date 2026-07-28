@@ -7,22 +7,10 @@ import {
   UpdateValidatorForClasses,
 } from '#validators/Classes'
 import Divisions from '#models/Divisions'
-import AcademicSession from '#models/AcademicSession'
 import db from '@adonisjs/lucid/services/db'
 
 export default class ClassesController {
   async indexClassesForSchool(ctx: HttpContext) {
-    let academicSession = await AcademicSession.query()
-      .where('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academicSession) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
-      })
-    }
-
     if (ctx.request.qs().without_fees_plan === 'true') {
       try {
         let class_for_School_without_fees_plan = await
@@ -162,7 +150,6 @@ export default class ClassesController {
     /**
      * TODO : Check for unique alise names of class , for perticular school
      */
-    let school_id = ctx.auth.user?.school_id
     // const academic_session_id = ctx.auth.user?.academic_session_id;
     if (ctx.auth.user?.role_id !== 1) {
       return ctx.response
@@ -183,7 +170,7 @@ export default class ClassesController {
         {
           class_id: created_class.id,
           division: 'A' as 'A',
-          academic_session_id: payload.academic_session_id as number as number,
+          academic_year: payload.academic_year as number,
         },
         { client: trx }
       )
@@ -206,7 +193,6 @@ export default class ClassesController {
     /**
      * TODO : Check for unique alise names of class , for perticular school
      */
-    let school_id = ctx.auth.user?.school_id
 
     if (ctx.auth.user?.role_id !== 1) {
       return ctx.response
@@ -225,7 +211,7 @@ export default class ClassesController {
         return {
           class_id: item.id,
           division: 'A' as 'A',
-          academic_session_id: item.academic_session_id as number,
+          academic_year: item.academic_year as number,
           aliases: null,
         }
       })
@@ -282,30 +268,12 @@ export default class ClassesController {
    *     ex : if there is division A and B are there , the next one should be C not D or any other .
    */
   async createDivision(ctx: HttpContext) {
-    let school_id = ctx.auth.user!.school_id!
     if (ctx.auth.user?.role_id !== 1) {
       return ctx.response
         .status(403)
         .json({ message: 'You are not allocated to manage this functions.' })
     }
     const payload = await CreateValidatorForDivision.validate(ctx.request.body())
-
-    let academic_Session = await AcademicSession.query()
-      .where('is_active', 1)
-      .andWhere('school_id', school_id as number)
-      .first()
-
-    if (!academic_Session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
-      })
-    }
-
-    if (academic_Session.id !== payload.academic_session_id) {
-      return ctx.response
-        .status(404)
-        .json({ message: 'Please provide a valid academic session id' })
-    }
 
     /**
      * Check it there a default class for this std , (ex for class 3-C , there should be a )

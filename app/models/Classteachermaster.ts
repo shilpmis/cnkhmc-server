@@ -5,7 +5,7 @@ import Divisions from '#models/Divisions'
 
 export default class ClassTeacherMaster extends Base {
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare division_id: number

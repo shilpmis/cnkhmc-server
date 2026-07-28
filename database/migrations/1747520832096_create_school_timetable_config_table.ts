@@ -6,7 +6,7 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
-      table.integer('academic_session_id').unsigned().references('id').inTable('academic_sessions').onDelete('CASCADE');
+      table.integer('academic_year').notNullable();
       table.integer('max_periods_per_day')
       table.integer('default_period_duration') // in minutes
       table.json('allowed_period_durations')

@@ -9,7 +9,7 @@ export default class ClassSeatAvailability extends Base {
   declare class_id: number
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare total_seats: number

@@ -11,7 +11,7 @@ export default class ParentClass extends Base {
   declare school_id: number
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare parent_class: 'Nursery' | 'LKG' | 'UKG' | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12

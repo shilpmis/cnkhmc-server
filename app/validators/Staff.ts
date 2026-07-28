@@ -27,13 +27,9 @@ export const CreateValidatorForStaff = vine.compile(
     emergency_contact_name: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
     emergency_contact_number: vine.number().nullable().optional(),
 
-    qualification: vine.enum([
-      'D.Ed', 'B.Ed', 'M.Ed', 'B.A + B.Ed', 'B.Sc + B.Ed', 'M.A + B.Ed', 'M.Sc + B.Ed', 'Ph.D', 'Diploma', 'B.Com', 'BBA', 'MBA', 'M.Com', 'ITI', 'SSC', 'HSC', 'Others'
-    ]).nullable().optional(),
+    qualification: vine.string().trim().maxLength(255).nullable().optional(),
 
-    subject_specialization: vine.enum([
-      'Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'Hindi', 'Gujarati', 'Social Science', 'Computer Science', 'Commerce', 'Economics', 'Physical Education', 'Arts', 'Music', 'Others'
-    ]).nullable().optional(),
+    subject_specialization: vine.string().trim().maxLength(255).nullable().optional(),
 
     joining_date: vine.date().nullable().optional(),
 
@@ -66,6 +62,7 @@ export const CreateValidatorForStaff = vine.compile(
     profile_photo: vine.string().optional().nullable().optional(),
 
     // New fields from STAFF DETAIL.xlsx
+    department_id: vine.number().nullable().optional(),
     department: vine.string().trim().maxLength(100).nullable().optional(),
     short_name: vine.string().trim().maxLength(100).nullable().optional(),
     minority: vine.string().trim().maxLength(50).nullable().optional(),
@@ -170,13 +167,9 @@ export const UpdateValidatorForStaff = vine.compile(
     emergency_contact_name: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
     emergency_contact_number: vine.number().nullable().optional(),
 
-    qualification: vine.enum([
-      'D.Ed', 'B.Ed', 'M.Ed', 'B.A + B.Ed', 'B.Sc + B.Ed', 'M.A + B.Ed', 'M.Sc + B.Ed', 'Ph.D', 'Diploma', 'B.Com', 'BBA', 'MBA', 'M.Com', 'ITI', 'SSC', 'HSC', 'Others'
-    ]).nullable().optional(),
+    qualification: vine.string().trim().maxLength(255).nullable().optional(),
 
-    subject_specialization: vine.enum([
-      'Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'Hindi', 'Gujarati', 'Social Science', 'Computer Science', 'Commerce', 'Economics', 'Physical Education', 'Arts', 'Music', 'Others'
-    ]).nullable().optional(),
+    subject_specialization: vine.string().trim().maxLength(255).nullable().optional(),
 
     joining_date: vine.date().nullable().optional(),
 
@@ -209,6 +202,7 @@ export const UpdateValidatorForStaff = vine.compile(
     profile_photo: vine.string().optional().nullable().optional(),
 
     // New fields from STAFF DETAIL.xlsx
+    department_id: vine.number().nullable().optional(),
     department: vine.string().trim().maxLength(100).nullable().optional(),
     short_name: vine.string().trim().maxLength(100).nullable().optional(),
     minority: vine.string().trim().maxLength(50).nullable().optional(),
@@ -286,13 +280,9 @@ export const CreateValidatorForBulkUpload = vine.compile(
     emergency_contact_name: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
     emergency_contact_number: vine.number().nullable().optional(),
 
-    qualification: vine.enum([
-      'D.Ed', 'B.Ed', 'M.Ed', 'B.A + B.Ed', 'B.Sc + B.Ed', 'M.A + B.Ed', 'M.Sc + B.Ed', 'Ph.D', 'Diploma', 'B.Com', 'BBA', 'MBA', 'M.Com', 'ITI', 'SSC', 'HSC', 'Others'
-    ]).nullable().optional(),
+    qualification: vine.string().trim().maxLength(255).nullable().optional(),
 
-    subject_specialization: vine.enum([
-      'Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'Hindi', 'Gujarati', 'Social Science', 'Computer Science', 'Commerce', 'Economics', 'Physical Education', 'Arts', 'Music', 'Others'
-    ]).nullable().optional(),
+    subject_specialization: vine.string().trim().maxLength(255).nullable().optional(),
 
     joining_date: vine.date().nullable().optional(),
 

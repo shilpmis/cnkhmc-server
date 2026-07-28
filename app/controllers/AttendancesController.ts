@@ -6,6 +6,7 @@ import { DateTime } from 'luxon'
 import db from '@adonisjs/lucid/services/db'
 import { ValidatorForMarkAttendance } from '#validators/attendance'
 import StudentEnrollments from '#models/StudentEnrollments'
+import Divisions from '#models/Divisions'
 
 export default class AttendanceController {
   /**
@@ -31,7 +32,7 @@ export default class AttendanceController {
       const existingAttendance = await AttendanceMaster.query()
         .where('class_id', class_id)
         .andWhere('attendance_date', date)
-        .andWhere('academic_session_id', payload.academic_session_id as number)
+        .andWhere('academic_year', payload.academic_year as number)
         .first()
 
       if (existingAttendance) {
@@ -54,7 +55,7 @@ export default class AttendanceController {
           {
             // school_id: ctx.auth.user!.school_id as number,
             class_id: payload.class_id,
-            academic_session_id: payload.academic_session_id as number as number,
+            academic_year: payload.academic_year as number as number,
             teacher_id: payload.marked_by,
             attendance_date: payload.date,
           },
@@ -94,7 +95,7 @@ export default class AttendanceController {
    */
   async getAttendanceDetails(ctx: HttpContext) {
     const { class_id, unix_date } = ctx.params
-    const academic_session_id = ctx.request.qs().academic_session
+    const academic_year = ctx.request.qs().academic_session
     // const school_id = ctx.auth.user!.school_id
 
     let date = new Date(unix_date * 1000).toISOString().split('T')[0]
@@ -118,15 +119,25 @@ export default class AttendanceController {
       })
     }
 
+    let division = await Divisions.query().where('id', class_id).preload('class').first()
+    let rollColumn = 'first_year_roll_number'
+    if (division && division.class) {
+      const className = division.class.class.toLowerCase()
+      if (className.includes('1st') || className.includes('first') || className.includes('1')) rollColumn = 'first_year_roll_number'
+      else if (className.includes('2nd') || className.includes('second') || className.includes('2')) rollColumn = 'second_year_roll_number'
+      else if (className.includes('3rd') || className.includes('third') || className.includes('3')) rollColumn = 'third_year_roll_number'
+      else if (className.includes('4th') || className.includes('fourth') || className.includes('4')) rollColumn = 'fourth_year_roll_number'
+    }
+
     try {
       const attendance = await AttendanceMaster.query()
         // .where('school_id', school_id as number)
         .where('class_id', class_id)
         .andWhere('attendance_date', date)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year as number)
         .preload('attendance_details', (query) => {
           query.preload('student', (studentQuery) => {
-            studentQuery.select('id', 'first_name', 'middle_name', 'last_name', 'roll_number')
+            studentQuery.select('id', 'first_name', 'middle_name', 'last_name', rollColumn)
           })
         })
         .first()
@@ -137,11 +148,11 @@ export default class AttendanceController {
         const student_enrollement_for_class = await StudentEnrollments.query()
           .preload('student', (studentQuery) => {
             studentQuery
-              .select('id', 'first_name', 'middle_name', 'last_name', 'roll_number')
-              .orderBy('roll_number', 'asc')
+              .select('id', 'first_name', 'middle_name', 'last_name', rollColumn)
+              .orderBy(rollColumn, 'asc')
           })
           .where('division_id', class_id)
-          .where('academic_session_id', academic_session_id as number)
+          .where('academic_year', academic_year as number)
 
         return ctx.response.status(200).json({
           date,
@@ -150,7 +161,7 @@ export default class AttendanceController {
           attendance_data: student_enrollement_for_class.map((student) => ({
             student_id: student.student.id,
             student_name: `${student.student.first_name} ${student.student.last_name}`,
-            roll_number: student.student.roll_number,
+            roll_number: (student.student as any)[rollColumn],
             status: null,
             remarks: null,
           })),
@@ -166,7 +177,7 @@ export default class AttendanceController {
         attendance_data: attendance.attendance_details.map((detail) => ({
           student_id: detail.student_id,
           student_name: `${detail.student.first_name} ${detail.student.last_name}`,
-          roll_number: detail.student.roll_number,
+          roll_number: (detail.student as any)[rollColumn],
           status: detail.attendance_status,
           remarks: detail.remarks,
         })),

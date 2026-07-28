@@ -15,7 +15,7 @@ export default class Classes extends Base {
   declare school_id: number
 
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare batch_id: number | null

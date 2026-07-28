@@ -7,12 +7,10 @@ export default class extends BaseSchema {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
       table.integer('school_id').unsigned().references('id').inTable('schools').onDelete('CASCADE')
-      table.integer('academic_session_id')
+      table.integer('academic_year').notNullable()
       .unsigned()
       .notNullable()
-      .references('id')
-      .inTable('academic_sessions')
-      .onDelete('CASCADE');
+      ;
       table.string('name').notNullable()
       table.text('description').nullable();
       table.enum('applicable_to' , ['fees_types' , 'plan']).notNullable();

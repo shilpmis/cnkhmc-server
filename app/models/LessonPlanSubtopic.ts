@@ -60,6 +60,9 @@ export default class LessonPlanSubtopic extends Base {
   @column({ columnName: 'reference_book' })
   declare referenceBook: string | null
 
+  @column({ columnName: 'assigned_staff_ids' })
+  declare assignedStaffIds: number[] | null
+
   @belongsTo(() => LessonPlanTopic, {
     foreignKey: 'topicId',
   })

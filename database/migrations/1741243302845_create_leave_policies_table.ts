@@ -6,7 +6,7 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
-      table.integer('academic_session_id').unsigned().references('id').inTable('schools') // wrong , should be academic_sessions added in new migration
+      table.integer('academic_year').notNullable()
       table.integer('school_id').unsigned().references('id').inTable('schools')
       table.integer('staff_role_id').unsigned().references('id').inTable('staff_role_master')
       table.integer('leave_type_id').unsigned().references('id').inTable('leave_types_master')

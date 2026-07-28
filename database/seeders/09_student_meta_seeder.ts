@@ -52,7 +52,7 @@ export default class extends BaseSeeder {
         postal_code: "370001", bank_name: "Bank of Baroda",
         account_no: 1234567845, IFSC_code: "BARB0001252"
       },
-    ]
+    ] as any[]
 
     for (const meta of metas) {
       await StudentMeta.updateOrCreate({ id: meta.id }, meta)

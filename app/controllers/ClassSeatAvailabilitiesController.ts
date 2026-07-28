@@ -1,4 +1,3 @@
-import AcademicSession from '#models/AcademicSession'
 import Classes from '#models/Classes'
 import ClassSeatAvailability from '#models/ClassSeatAvailability'
 import QuotaAllocation from '#models/QuotaAllocation'
@@ -9,16 +8,18 @@ export default class ClassSeatAvailabilitiesController {
    * Add seat availability for a class
    */
   public async addSeatAvailability(ctx: HttpContext) {
-    const { class_id, total_seats, academic_session_id } = ctx.request.only([
+    const { class_id, total_seats, academic_year, academic_session_id } = ctx.request.only([
       'class_id',
       'total_seats',
+      'academic_year',
       'academic_session_id',
     ])
+    const year = Number(academic_year || academic_session_id)
 
     // Check if the class exists
     const classData = await Classes.query()
       // .preload('seat_availability', (query) => {
-      //   query.where('academic_session_id', academic_session_id as number).first()
+      //   query.where('academic_year', year).first()
       // })
       .where('id', class_id)
       .andWhere('school_id', ctx.auth.user!.school_id as number)
@@ -37,7 +38,7 @@ export default class ClassSeatAvailabilitiesController {
 
     let exsiting_seats = await ClassSeatAvailability.query()
       .where('class_id', class_id)
-      .where('academic_session_id', academic_session_id as number)
+      .where('academic_year', year)
       .first()  
 
     // Check if seat availability already exists
@@ -50,7 +51,7 @@ export default class ClassSeatAvailabilitiesController {
     const seatAvailability = await ClassSeatAvailability.create({
       class_id,
       total_seats,
-      academic_session_id: academic_session_id as number,
+      academic_year: year,
       quota_allocated_seats: 0,
       general_available_seats: total_seats,
       filled_seats: 0,
@@ -67,30 +68,22 @@ export default class ClassSeatAvailabilitiesController {
    * Get all classes seat availability
    */
   public async getAllClassesSeatAvailability(ctx: HttpContext) {
-    let acadamic_session_id = ctx.request.input('acadamic_session')
-    if (!acadamic_session_id) {
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('acadamic_session') || ctx.request.input('academic_session_id')
+    if (!academic_year) {
       return ctx.response.badRequest({
-        error: 'Academic session ID is required',
+        error: 'Academic year is required',
       })
-    }
-    let academic_session = await AcademicSession.query()
-      .where('id', acadamic_session_id)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.notFound({ error: 'No active academic session found' })
     }
 
     const classSeatAvailabilities = await ClassSeatAvailability.query()
       .preload('class')
       .preload('quota_allocation', (query) => {
-        query.preload('quota', (query) => {
-          query.where('academic_session_id', academic_session.id)
+        query.preload('quota', (q) => {
+          q.where('academic_year', Number(academic_year))
         })
-        query.where('academic_session_id', academic_session.id)
+        query.where('academic_year', Number(academic_year))
       })
-      .where('academic_session_id', academic_session.id)
+      .where('academic_year', Number(academic_year))
 
     // if (!classSeatAvailabilities.length) {
     //   return ctx.response.notFound({ error: 'No seat availability data found' })
@@ -115,25 +108,18 @@ export default class ClassSeatAvailabilitiesController {
       })
     }
 
-    let activeSession = ctx.params.academic_session_id || ctx.request.input('academic_session_id')
-    if (!activeSession) {
-      activeSession = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('school_id', ctx.auth.user!.school_id as number)
-        .first()
-    }
-    if (!activeSession) {
-      return ctx.response.notFound({
-        error: 'No active academic session found',
+    let activeYear = ctx.params.academic_year || ctx.params.academic_session_id || ctx.request.input('academic_year') || ctx.request.input('academic_session_id')
+    if (!activeYear) {
+      return ctx.response.badRequest({
+        error: 'Academic year is required',
       })
     }
-    // Fetch seat availability for the class
 
     const availability = await ClassSeatAvailability.query()
       .preload('class')
       .preload('quota_allocation')
       .where('class_id', ctx.params.class_id)
-      .andWhere('academic_session_id', activeSession.id)
+      .andWhere('academic_year', Number(activeYear))
       .first()
 
     if (!availability) {
@@ -169,21 +155,14 @@ export default class ClassSeatAvailabilitiesController {
         return response.badRequest({ message: 'Invalid total seats value' })
       }
 
-      // Get current active academic session for school
-      const activeSession = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('school_id', auth.user!.school_id as number)
-        .first()
-
-      if (!activeSession) {
-        return response.notFound({ message: 'No active academic session found for this school' })
+      let academic_year = Number(request.input('academic_year') || request.input('academic_session_id'))
+      if (!academic_year) {
+        return response.badRequest({ message: 'Academic year is required' })
       }
-
-      const academic_session_id = activeSession.id
 
       let seatAvailability = await ClassSeatAvailability.query()
         .where('class_id', class_id)
-        .where('academic_session_id', academic_session_id as number)
+        .where('academic_year', academic_year)
         .first()
 
       if (!seatAvailability) {
@@ -195,7 +174,7 @@ export default class ClassSeatAvailabilitiesController {
       // Get total quota-allocated seats
       const quotaSum = await QuotaAllocation.query()
         .where('class_id', class_id)
-        .andWhere('academic_session_id', academic_session_id as number)
+        .andWhere('academic_year', academic_year)
         .sum('total_seats as total')
 
       const quota_allocated_seats = Number(quotaSum[0]?.$extras.total ?? 0)

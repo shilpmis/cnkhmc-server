@@ -5,8 +5,8 @@ export default class extends BaseSchema {
 
   async up() {
     this.schema.alterTable(this.tableName, (table) => {
-      table.dropForeign('academic_session_id')
-      table.dropColumn('academic_session_id')
+      // table.dropForeign('academic_year')
+      table.dropColumn('academic_year')
     })
   }
 

@@ -26,7 +26,7 @@ export default class TestTeacherTimetable extends BaseCommand {
         // 2. Fetch staff enrollment for session 33
         const staffEnrollment = await db.from('staff_enrollments')
           .where('staff_id', user.staff_id!)
-          .where('academic_session_id', 33)
+          .where('academic_year', 33)
           .first()
 
         if (!staffEnrollment) {
@@ -52,7 +52,7 @@ export default class TestTeacherTimetable extends BaseCommand {
 
         // 4. Try serialization
         this.logger.info(`Attempting to serialize periods...`)
-        const serialized = periods.map(p => p.serialize())
+        // // const serialized = periods.map(p => p.serialize())
         this.logger.success(`Successfully serialized all ${periods.length} periods.`)
       }
 

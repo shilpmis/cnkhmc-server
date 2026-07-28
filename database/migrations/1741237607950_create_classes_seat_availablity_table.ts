@@ -7,12 +7,10 @@ export default class CreateClassSeatAvailabilityTable extends BaseSchema {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id').primary()
       table
-        .integer('academic_session_id')
+        .integer('academic_year')
         .unsigned()
         .notNullable()
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
+        
       table
         .integer('class_id')
         .unsigned()
@@ -29,8 +27,8 @@ export default class CreateClassSeatAvailabilityTable extends BaseSchema {
       table.timestamp('created_at')
       table.timestamp('updated_at')
 
-      //unique constraint for class_id and academic_session_id
-      table.unique(['class_id', 'academic_session_id'], 'uq_class_academic_session')
+      //unique constraint for class_id and academic_year
+      table.unique(['class_id', 'academic_year'], 'uq_class_academic_session')
     })
   }
 

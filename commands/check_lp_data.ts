@@ -27,7 +27,7 @@ export default class CheckLpData extends BaseCommand {
       const tokenValue = token.value!.release()
       this.logger.info(`Generated token: Bearer ${tokenValue.substring(0, 10)}...`)
 
-      const url = 'http://localhost:3333/api/v1/leave-policy/user?academic_session_id=33'
+      const url = 'http://localhost:3333/api/v1/leave-policy/user?academic_year=33'
       this.logger.info(`Making HTTP GET request to ${url}...`)
 
       const response = await fetch(url, {

@@ -1,4 +1,3 @@
-import AcademicSession from '#models/AcademicSession';
 import Divisions from '#models/Divisions';
 import StaffEnrollment from '#models/StaffEnrollment';
 import SubjectDivisionMaster from '#models/SubjectDivisionMaster';
@@ -12,47 +11,28 @@ import db from '@adonisjs/lucid/services/db';
 export default class SubjectController {
 
   async indexSubjects(ctx: HttpContext) {
-
-    let acadaemic_seesion_id = ctx.request.input('academic_session');
-    // let division_id = ctx.params.division_id;
-
-    let acadaemic_seesion = await AcademicSession
-      .query()
-      .where('id', acadaemic_seesion_id)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first();
-
-    if (!acadaemic_seesion) {
-      return ctx.response.status(404).json({
-        message: 'Academic session not found',
-      });
+    try {
+      let subjects = await Subjects.query().orderBy('id', 'desc')
+      return ctx.response.status(200).json(subjects)
+    } catch (error: any) {
+      console.error('Error in indexSubjects:', error)
+      return ctx.response.status(500).json({ message: 'Failed to fetch subjects', error: error?.message })
     }
-
-    let subjects = await Subjects
-      .query()
-      .where('academic_session_id', acadaemic_seesion_id)
-      .orderBy('id', 'desc');
-
-    return ctx.response.status(200).json(subjects);
   }
 
   async indexSubjectsForDivision(ctx: HttpContext) {
     let acadaemic_seesion_id = ctx.request.input('academic_session');
     let division_id = ctx.params.division_id;
-    let acadaemic_seesion = await AcademicSession
-      .query()
-      .where('id', acadaemic_seesion_id)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first();
-    if (!acadaemic_seesion) {
-      return ctx.response.status(404).json({
-        message: 'Academic session not found',
-      });
-    }
+//     let acadaemic_seesion = await AcademicSession
+//       .query()
+//       .where('id', acadaemic_seesion_id)
+//       .andWhere('school_id', ctx.auth.user!.school_id as number)
+//       .first();
+    // Academic session check removed
     let division = await Divisions
       .query()
       .where('id', division_id)
-      // .andWhere('academic_session_id', acadaemic_seesion_id)
+      // .andWhere('academic_year', acadaemic_seesion_id)
       .first();
     if (!division) {
       return ctx.response.status(404).json({
@@ -69,7 +49,7 @@ export default class SubjectController {
         })
       })
       .preload('subject')
-      .where('academic_session_id', acadaemic_seesion_id)
+      .where('academic_year', acadaemic_seesion_id)
       .andWhere('division_id', division_id)
       .orderBy('id', 'desc');
 
@@ -82,56 +62,45 @@ export default class SubjectController {
 
     // validate the payload
 
-    let acadaemic_seesion = await AcademicSession
-      .query()
-      .where('id', payload.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first();
+//     let acadaemic_seesion = await AcademicSession
+//       .query()
+//       .where('id', payload.academic_year as number)
+//       .andWhere('school_id', ctx.auth.user!.school_id as number)
+//       .first();
 
-    if (!acadaemic_seesion) {
-      return ctx.response.status(404).json({
-        message: 'Academic session not found',
-      });
-    }
-
-    if (acadaemic_seesion.is_active == false) {
-      return ctx.response.status(400).json({
-        message: 'Academic session is not active',
-      });
-    }
+    // Academic session check removed
 
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
+    const academicYear = payload.academic_year || payload.academic_session_id || 0;
 
-    let subject = await Subjects.create({ ...payload, code: `SUB${randomDigits}` });
+    let subject = await Subjects.create({ 
+      name: payload.name,
+      description: payload.description || null,
+      academic_year: academicYear,
+      year: payload.year || null,
+      code: `SUB${randomDigits}` 
+    });
 
     return ctx.response.status(201).json(subject);
   }
 
   async assignSubjectToDivision(ctx: HttpContext) {
     let payload = await CreateValidatorForAssignSubject.validate(ctx.request.body());
+    
+    const academicYear = payload.academic_year || payload.academic_session_id || 0;
 
-    let acadaemic_seesion = await AcademicSession
-      .query()
-      .where('id', payload.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first();
+//     let acadaemic_seesion = await AcademicSession
+//       .query()
+//       .where('id', academicYear)
+//       .andWhere('school_id', ctx.auth.user!.school_id as number)
+//       .first();
 
-    if (!acadaemic_seesion) {
-      return ctx.response.status(404).json({
-        message: 'Academic session not found',
-      });
-    }
-
-    if (acadaemic_seesion.is_active == false) {
-      return ctx.response.status(400).json({
-        message: 'Academic session is not active',
-      });
-    }
+    // Academic session check removed
 
     let division = await Divisions
       .query()
       .where('id', payload.division_id)
-      // .andWhere('academic_session_id', payload.academic_session_id as number)
+      // .andWhere('academic_year', academicYear)
       .first();
 
     if (!division) {
@@ -146,7 +115,6 @@ export default class SubjectController {
       let validate_sub = await Subjects
         .query()
         .where('id', subject.subject_id)
-        .andWhere('academic_session_id', payload.academic_session_id as number)
         .first();
 
       if (!validate_sub) {
@@ -160,7 +128,7 @@ export default class SubjectController {
         division_id: payload.division_id,
         description: subject.description,
         code_for_division: subject.code_for_division,
-        academic_session_id: payload.academic_session_id as number as number,
+        academic_year: academicYear,
         status: 'Active',
       });
       res.push(assign_subject);
@@ -189,7 +157,6 @@ export default class SubjectController {
       for (const staff_enrollment_id of staff_enrollment_ids) {
         let staff_enrollment = await StaffEnrollment.query()
           .where('id', staff_enrollment_id)
-          .andWhere('academic_session_id', subj_validation?.academic_session_id as number)
           .first();
 
         if (!staff_enrollment) {
@@ -219,31 +186,47 @@ export default class SubjectController {
     }
   }
 
+  async unassignStaffFromSubject(ctx: HttpContext) {
+    const id = Number(ctx.params.id);
+    
+    try {
+      const assignedStaff = await SubjectDivisionStaffMaster.find(id);
+      
+      if (!assignedStaff) {
+        return ctx.response.status(404).json({
+          message: 'Staff assignment not found',
+        });
+      }
+      
+      await assignedStaff.delete();
+      
+      return ctx.response.status(200).json({
+        message: 'Staff successfully unassigned from subject',
+      });
+    } catch (error) {
+      console.error("Error unassigning staff:", error);
+      return ctx.response.status(500).json({
+        message: 'Internal server error',
+        error: error,
+      });
+    }
+  }
+
   async updateSubject(ctx: HttpContext) {
     const subjectId = Number(ctx.params.subject_id);
     let payload = await CreateValidatorForSubject.validate(ctx.request.body());
 
-    let acadaemic_seesion = await AcademicSession
-      .query()
-      .where('id', payload.academic_session_id as number)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first();
+//     let acadaemic_seesion = await AcademicSession
+//       .query()
+//       .where('id', payload.academic_year as number)
+//       .andWhere('school_id', ctx.auth.user!.school_id as number)
+//       .first();
 
-    if (!acadaemic_seesion) {
-      return ctx.response.status(404).json({
-        message: 'Academic session not found',
-      });
-    }
-
-    if (acadaemic_seesion.is_active == false) {
-      return ctx.response.status(400).json({
-        message: 'Academic session is not active',
-      });
-    }
+    // Academic session check removed
 
     let subject = await Subjects.query()
       .where('id', subjectId)
-      .andWhere('academic_session_id', payload.academic_session_id as number)
+      .andWhere('academic_year', payload.academic_year as number)
       .first();
 
     if (!subject) {

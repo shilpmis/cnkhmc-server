@@ -7,7 +7,7 @@ export default class GlobalSearchController {
     try {
       const school_id = auth.user?.school_id
       const {
-        academic_session_id,
+        academic_year,
         name,
         gr_no,
         aadhar_no,
@@ -17,7 +17,7 @@ export default class GlobalSearchController {
         // enrollment_status,
       } = request.qs()
 
-      if (!school_id || !academic_session_id) {
+      if (!school_id || !academic_year) {
         return response.badRequest({ message: 'Invalid request: Missing required parameters.' })
       }
 
@@ -25,14 +25,14 @@ export default class GlobalSearchController {
       .query()
       .preload('academic_class' , (query)=>{
         query.preload('division') 
-        query.where('academic_session_id' , academic_session_id)
+        query.where('academic_year' , academic_year)
       })
-      .select(['id' ,'enrollment_code' ,'first_name' ,  'middle_name' , 'last_name' , 'gender' , 'gr_no' , 'roll_number' ,'primary_mobile'])
+      .select(['id' ,'enrollment_code' ,'first_name' ,  'middle_name' , 'last_name' , 'gender' , 'gr_no' , 'first_year_roll_number', 'second_year_roll_number', 'third_year_roll_number', 'fourth_year_roll_number' ,'primary_mobile'])
       .where('school_id', school_id as number)
 
       // Filter by student enrollment for the academic session
       // studentsQuery.whereHas('academic_class', (enrollmentQuery) => {
-      //   enrollmentQuery.where('academic_session_id', academic_session_id as number)
+      //   enrollmentQuery.where('academic_year', academic_year as number)
         
       //   // Optional filter by enrollment status if provided
       //   if (enrollment_status) {
@@ -70,22 +70,22 @@ export default class GlobalSearchController {
       //   studentsQuery
       //     .preload('student_meta')
       //     .preload('fees_status', (query) => {
-      //       query.where('academic_session_id', academic_session_id as number)
+      //       query.where('academic_year', academic_year as number)
       //     })
       //     .preload('provided_concession', (query) => {
-      //       query.where('academic_session_id', academic_session_id as number).preload('concession')
+      //       query.where('academic_year', academic_year as number).preload('concession')
       //     })
       //     .preload('academic_class', (query) => {
-      //       query.where('academic_session_id', academic_session_id as number)
-      //         .select(['id', 'student_id', 'division_id', 'academic_session_id', 'status'])
+      //       query.where('academic_year', academic_year as number)
+      //         .select(['id', 'student_id', 'division_id', 'academic_year', 'status'])
       //         .preload('division', (query) => {
       //           query.preload('class')
       //         })
       //     })
       // } else {
       //   studentsQuery.preload('academic_class', (query) => {
-      //     query.where('academic_session_id', academic_session_id as number)
-      //       .select(['id', 'student_id', 'division_id', 'academic_session_id', 'status'])
+      //     query.where('academic_year', academic_year as number)
+      //       .select(['id', 'student_id', 'division_id', 'academic_year', 'status'])
       //   })
       // }
 
@@ -102,7 +102,7 @@ export default class GlobalSearchController {
     try {
       const school_id = auth.user?.school_id
       const {
-        academic_session_id,
+        academic_year,
         name,
         employee_code,
         aadhar_no,
@@ -113,7 +113,7 @@ export default class GlobalSearchController {
         enrollment_status,
       } = request.qs()
 
-      if (!school_id || !academic_session_id) {
+      if (!school_id || !academic_year) {
         return response.badRequest({ message: 'Invalid request: Missing required parameters.' })
       }
 
@@ -123,7 +123,7 @@ export default class GlobalSearchController {
 
       // Filter by staff enrollment for the academic session
       staffQuery.whereHas('enrollments', (enrollmentQuery) => {
-        enrollmentQuery.where('academic_session_id', academic_session_id as number)
+        enrollmentQuery.where('academic_year', academic_year as number)
         
         // Optional filter by enrollment status if provided
         if (enrollment_status) {
@@ -166,14 +166,14 @@ export default class GlobalSearchController {
       
       // Preload enrollments filtered by academic session
       staffQuery.preload('enrollments', (query) => {
-        query.where('academic_session_id', academic_session_id as number)
+        query.where('academic_year', academic_year as number)
       });
 
       if (detailed === 'true') {
         staffQuery
           .preload('school')
           .preload('assigend_classes', (query) => {
-            query.where('academic_session_id', academic_session_id as number)
+            query.where('academic_year', academic_year as number)
               .preload('divisions', (divisionQuery) => {
                 divisionQuery.preload('class')
               })

@@ -5,7 +5,7 @@ export default class FeesReportController {
    * Generate annual fee report
    */
 //   public async annualReport({ request, response }: HttpContext) {
-//     const { academicSessionId, classId, divisionId } = request.qs()
+//     const { academicYear, classId, divisionId } = request.qs()
 
 //     try {
 //       const query = StudentFeesInstallments.query()
@@ -25,7 +25,7 @@ export default class FeesReportController {
 //         .join('student_fees_masters', 'student_fees_installments.student_fee_master_id', '=', 'student_fees_masters.id')
 //         .join('students', 'student_fees_masters.student_id', '=', 'students.id')
 //         .join('student_enrollments', 'students.id', '=', 'student_enrollments.student_id')
-//         .join('academic_sessions', 'student_enrollments.academic_session_id', '=', 'academic_sessions.id')
+//         .join('academic_sessions', 'student_enrollments.academic_year', '=', 'academic_sessions.id')
 //         .join('classes', 'student_enrollments.class_id', '=', 'classes.id')
 //         .leftJoin('divisions', 'student_enrollments.division_id', '=', 'divisions.id')
 //         .join('student_fees_plan_masters', 'student_fees_masters.student_fees_plan_master_id', '=', 'student_fees_plan_masters.id')
@@ -34,8 +34,8 @@ export default class FeesReportController {
 //         .join('fees_types', 'fees_plan_details.fee_type_id', '=', 'fees_types.id')
 //         .whereRaw('student_fees_installments.fees_type_id = fees_types.id'); // Ensure correct join for fee type
 
-//       if (academicSessionId) {
-//         query.where('academic_sessions.id', academicSessionId)
+//       if (academicYear) {
+//         query.where('academic_sessions.id', academicYear)
 //       }
 //       if (classId) {
 //         query.where('classes.id', classId)
@@ -134,7 +134,7 @@ export default class FeesReportController {
 //    * Generate monthly fee report
 //    */
 //   public async monthlyReport({ request, response }: HttpContext) {
-//     const { academicSessionId, classId, divisionId, month } = request.qs()
+//     const { academicYear, classId, divisionId, month } = request.qs()
 
 //     if (!month) {
 //       return response.badRequest({ message: 'Month parameter is required' })
@@ -163,7 +163,7 @@ export default class FeesReportController {
 //         .join('student_fees_masters', 'student_fees_installments.student_fee_master_id', '=', 'student_fees_masters.id')
 //         .join('students', 'student_fees_masters.student_id', '=', 'students.id')
 //         .join('student_enrollments', 'students.id', '=', 'student_enrollments.student_id')
-//         .join('academic_sessions', 'student_enrollments.academic_session_id', '=', 'academic_sessions.id')
+//         .join('academic_sessions', 'student_enrollments.academic_year', '=', 'academic_sessions.id')
 //         .join('classes', 'student_enrollments.class_id', '=', 'classes.id')
 //         .leftJoin('divisions', 'student_enrollments.division_id', '=', 'divisions.id')
 //         .join('student_fees_plan_masters', 'student_fees_masters.student_fees_plan_master_id', '=', 'student_fees_plan_masters.id')
@@ -173,8 +173,8 @@ export default class FeesReportController {
 //         .whereRaw('student_fees_installments.fees_type_id = fees_types.id') // Ensure correct join for fee type
 //         .whereRaw(`EXTRACT(MONTH FROM student_fees_installments.due_date) = ${monthNumber}`);
 
-//       if (academicSessionId) {
-//         query.where('academic_sessions.id', academicSessionId)
+//       if (academicYear) {
+//         query.where('academic_sessions.id', academicYear)
 //       }
 //       if (classId) {
 //         query.where('classes.id', classId)
@@ -271,7 +271,7 @@ export default class FeesReportController {
 
     // public async installmentWiseReportForClass(ctx: HttpContext) {
 
-    //     // api/v1/fees-report/installment-wise-report-for-class?academicSessionId=1&classId=1&divisionId=1 
+    //     // api/v1/fees-report/installment-wise-report-for-class?academicYear=1&classId=1&divisionId=1 
 
     //     let divisionId = ctx.request.input('divisionId')
     // }   

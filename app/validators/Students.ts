@@ -4,7 +4,7 @@ export const CreateValidatorStundet = vine.compile(
   vine.object({
     students_data: vine.object({
       class_id: vine.number(),
-      // enrollment_code : vine.string().trim().minLength(2).maxLength(50),
+      enrollment_code: vine.string().trim().maxLength(100).unique({ table: 'students', column: 'enrollment_code' }).nullable().optional(),
       admission_number: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
       first_name: vine.string().trim().minLength(2).maxLength(50),
       middle_name: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
@@ -204,7 +204,7 @@ export const CreateValidatorForUpload = vine.compile(
   vine.object({
     students_data: vine.object({
       school_id: vine.number(),
-
+      enrollment_code: vine.string().trim().maxLength(100).unique({ table: 'students', column: 'enrollment_code' }).nullable().optional(),
       first_name: vine.string().trim().minLength(2).maxLength(50),
       middle_name: vine.string().trim().optional(),
       last_name: vine.string().trim().minLength(2).maxLength(50),
@@ -215,7 +215,7 @@ export const CreateValidatorForUpload = vine.compile(
 
       gender: vine.enum(['Male', 'Female']).nullable().optional(),
 
-      birth_date: vine.date().optional(),
+      birth_date: vine.date().nullable().optional(),
 
       /**
        * FIX : this should be unique in between school's students
@@ -233,11 +233,16 @@ export const CreateValidatorForUpload = vine.compile(
       /**
        * FIX : make this optional or remove roll number from table in next migrtion
        *  */
-      roll_number: vine.number().positive().nullable(),
+      roll_number: vine.number().positive().nullable().optional(),
+      first_year_roll_number: vine.number().positive().nullable().optional(),
+      second_year_roll_number: vine.number().positive().nullable().optional(),
+      third_year_roll_number: vine.number().positive().nullable().optional(),
+      fourth_year_roll_number: vine.number().positive().nullable().optional(),
 
       aadhar_no: vine.number().nullable(),
 
       is_active: vine.boolean().nullable().optional(),
+      student_type: vine.enum(['SCHOOL', 'COLLEGE']).optional(),
     }),
     student_meta_data: vine
       .object({
@@ -255,11 +260,11 @@ export const CreateValidatorForUpload = vine.compile(
         caste: vine.string().trim().minLength(2).maxLength(50).nullable(),
         caste_in_guj: vine.string().trim().nullable(),
 
-        category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).nullable(),
+        category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).nullable().optional(),
 
-        admission_date: vine.date().nullable(),
+        admission_date: vine.date().nullable().optional(),
 
-        admission_class_id: vine.number().nullable(),
+        admission_class_id: vine.number().nullable().optional(),
 
         secondary_mobile: vine.number().nullable(),
 
@@ -268,7 +273,7 @@ export const CreateValidatorForUpload = vine.compile(
 
         address: vine.string().trim().minLength(5).maxLength(200).nullable(),
 
-        district: vine.string().trim().minLength(3).maxLength(100).nullable(),
+        district: vine.string().trim().minLength(3).maxLength(100).nullable().optional(),
         city: vine.string().trim().minLength(3).maxLength(100).nullable(),
 
         state: vine.string().trim().minLength(3).maxLength(50).nullable(),
@@ -440,7 +445,7 @@ export const CreateValidatorForMultipleStundets = vine.compile(
             caste: vine.string().trim().minLength(2).maxLength(50).optional(),
             caste_in_guj: vine.string().trim().optional(),
 
-            category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).optional(),
+            category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).nullable().optional(),
 
             admission_date: vine.date().optional(),
 
@@ -546,7 +551,7 @@ export const UpdateValidatorForStundets = vine.compile(
         caste: vine.string().trim().minLength(2).maxLength(50).optional(),
         caste_in_guj: vine.string().trim().optional().optional(),
 
-        category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).optional(),
+        category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).nullable().optional(),
 
         admission_date: vine.date().optional(),
 
@@ -713,5 +718,5 @@ export const createStudentValidatorForOnBoarding = vine.compile(
       gender: vine.enum(['Male', 'Female']).nullable().optional(),
       primary_mobile : vine.number(),
       father_name: vine.string().trim().minLength(3).maxLength(50).nullable().optional(),
-      academic_session_id : vine.number(),
+      academic_year : vine.number(),
   }))

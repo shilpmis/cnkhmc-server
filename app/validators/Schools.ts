@@ -36,6 +36,7 @@ export const UpdateValidatorForSchools = vine.compile(
     school_type: vine.enum(['SCHOOL', 'COLLEGE']).optional(),
     contact_number: vine.number().min(10).optional(),
     address: vine.string().maxLength(500).optional(),
+    enrollment_number_format: vine.string().maxLength(255).optional(),
     // subscription_type: vine.enum(['FREE', 'PREMIUM']).optional(),
 
   })

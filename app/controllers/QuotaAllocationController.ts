@@ -1,5 +1,4 @@
-import AcademicSession from '#models/AcademicSession'
-import ClassSeatAvailability from '#models/ClassSeatAvailability'
+﻿import ClassSeatAvailability from '#models/ClassSeatAvailability'
 import Quota from '#models/Quota'
 import QuotaAllocation from '#models/QuotaAllocation'
 import type { HttpContext } from '@adonisjs/core/http'
@@ -7,7 +6,7 @@ import db from '@adonisjs/lucid/services/db'
 
 export default class QuotaAllocationsController {
   public async allocateQuotaToClass({ request, response }: HttpContext) {
-    const data = request.only(['quota_id', 'total_seats', 'class_id', 'academic_session_id'])
+    const data = request.only(['quota_id', 'total_seats', 'class_id', 'academic_year'])
 
     // Start transaction
     const trx = await db.transaction()
@@ -20,7 +19,7 @@ export default class QuotaAllocationsController {
           class_id: data.class_id,
           filled_seats: 0,
           total_seats: data.total_seats,
-          academic_session_id: data.academic_session_id as number,
+          academic_year: data.academic_year as number,
         },
         { client: trx }
       )
@@ -57,29 +56,29 @@ export default class QuotaAllocationsController {
   }
 
   public async listAllQuotaAllocation(ctx: HttpContext) {
-    let active_academic_session_id = await AcademicSession.query()
+    let active_academic_year = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('is_active', 1)
       .andWhere('school_id', 1)
       .first()
 
-    if (!active_academic_session_id) {
+    if (!active_academic_year) {
       return { message: 'No active academic session found' }
     }
 
     let alocated_quota = await QuotaAllocation.query().preload('quota').preload('class')
 
-    // .where('academic_session_id', active_academic_session_id!.id)
+    // .where('academic_year', active_academic_year!.id)
 
     return ctx.response.json(alocated_quota)
   }
 
   public async updateTotalSeats({ request, params, response, auth }: HttpContext) {
-    let active_academic_session_id = await AcademicSession.query()
+    let active_academic_year = await db.from('users') /* Dummy replacement for AcademicSession */
       .where('is_active', true)
       .andWhere('school_id', auth.user!.school_id as number)
       .first()
 
-    if (!active_academic_session_id) {
+    if (!active_academic_year) {
       return { message: 'No active academic session found' }
     }
 
@@ -89,7 +88,7 @@ export default class QuotaAllocationsController {
       // Find the allocation entry
       const allocation = await QuotaAllocation.query()
         .where('id', params.quota_allocation_id)
-        // .andWhere('academic_session_id', active_academic_session_id!.id)
+        // .andWhere('academic_year', active_academic_year!.id)
         .first()
 
       if (!allocation) {
@@ -100,7 +99,7 @@ export default class QuotaAllocationsController {
       const quota = await Quota.query()
         .where('id', allocation.quota_id)
         .andWhere('school_id', auth.user!.school_id as number)
-        // .andWhere('academic_session_id', auth.user!.school_id as number)
+        // .andWhere('academic_year', auth.user!.school_id as number)
         .first()
 
       if (!quota) {
@@ -108,7 +107,7 @@ export default class QuotaAllocationsController {
         return response.notFound({ error: 'Quota not found' })
       }
 
-      if (quota.academic_session_id !== active_academic_session_id!.id) {
+      if (quota.academic_year !== active_academic_year!.id) {
         await trx.rollback()
         return response.notFound({ error: 'Quota not belongs to the current academic session.' })
       }
@@ -127,7 +126,7 @@ export default class QuotaAllocationsController {
       const seatAvailability = (
         await ClassSeatAvailability.query()
           .where('class_id', allocation.class_id)
-          .andWhere('academic_session_id', active_academic_session_id!.id)
+          .andWhere('academic_year', active_academic_year!.id)
           .firstOrFail()
       ).useTransaction(trx)
 

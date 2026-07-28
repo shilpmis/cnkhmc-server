@@ -3,7 +3,8 @@ import vine from "@vinejs/vine";
 export const CreateValidatorForSchoolTimeTableConfig = vine.compile(
   vine.object({
     // add here
-    academic_session_id: vine.number(),
+    academic_year: vine.number().optional(),
+    academic_session_id: vine.number().optional(),
     max_periods_per_day: vine.number(),
     default_period_duration: vine.number(),
     allowed_period_durations: vine.array(vine.number()),

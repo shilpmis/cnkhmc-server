@@ -7,7 +7,7 @@ import SatffPayrunTemplates from './SatffPayrunTemplates.js'
 
 export default class StaffEnrollment extends Base {
   @column()
-  declare academic_session_id: number
+  declare academic_year: number
 
   @column()
   declare staff_id: number

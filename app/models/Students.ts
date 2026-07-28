@@ -71,7 +71,16 @@ export default class Students extends Base {
   declare mother_name_in_guj: string | null
 
   @column()
-  declare roll_number: number | null
+  declare first_year_roll_number: number | null
+
+  @column()
+  declare second_year_roll_number: number | null
+
+  @column()
+  declare third_year_roll_number: number | null
+
+  @column()
+  declare fourth_year_roll_number: number | null
 
   @column()
   declare aadhar_no: number | null

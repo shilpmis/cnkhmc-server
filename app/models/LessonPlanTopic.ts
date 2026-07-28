@@ -28,6 +28,9 @@ export default class LessonPlanTopic extends Base {
   @column()
   declare order: number
 
+  @column({ columnName: 'assigned_staff_ids' })
+  declare assignedStaffIds: number[] | null
+
   @belongsTo(() => LessonPlan, {
     foreignKey: 'lessonPlanId',
   })

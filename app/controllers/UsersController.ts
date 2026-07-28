@@ -11,7 +11,6 @@ import Schools from '#models/Schools'
 import db from '@adonisjs/lucid/services/db'
 import Staff from '#models/Staff'
 import ClassTeacherMaster from '#models/Classteachermaster'
-import AcademicSession from '#models/AcademicSession'
 import Divisions from '#models/Divisions'
 
 export default class UsersController {
@@ -115,21 +114,14 @@ export default class UsersController {
   }
 
   async onBoardStaffAsUser(ctx: HttpContext) {
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action',
       })
     }
     const payload = await CreateValidatorForOnBoardTeacherAsUser.validate(ctx.request.all())
 
-    let acadamic_seesion = await AcademicSession.query()
-      .where('is_active', true)
-      .andWhere('school_id', ctx.auth.user!.school_id as number)
-      .first()
-
-    if (!acadamic_seesion) {
-      return ctx.response.status(404).json({ message: 'Academic session not found' })
-    }
+    // Academic session check removed
 
     const staff = await Staff.query()
       .preload('school')
@@ -183,7 +175,7 @@ export default class UsersController {
           } else {
             await ClassTeacherMaster.create(
               {
-                academic_session_id: acadamic_seesion.id,
+                academic_year: 1,
                 division_id: division_id,
                 staff_id: staff.id,
                 status: 'Active',
@@ -210,7 +202,7 @@ export default class UsersController {
 
     try {
       // ✅ Authorization check
-      if (ctx.auth.user!.role_id !== 1) {
+      if (![1, 2, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
         return ctx.response.status(401).json({
           message: 'You are not authorized to perform this action',
         })
@@ -227,14 +219,7 @@ export default class UsersController {
         return ctx.response.status(404).json({ message: 'User not found' })
       }
 
-      let acadamic_seesion = await AcademicSession.query()
-        .where('is_active', true)
-        .andWhere('school_id', ctx.auth.user!.school_id as number)
-        .first()
-
-      if (!acadamic_seesion) {
-        return ctx.response.status(404).json({ message: 'Academic session not found' })
-      }
+      // Academic session check removed
 
       const { assign_classes, unassign_classes, ...payload } =
         await UpdateValidatorForOnBoardTeacherAsUser.validate(ctx.request.all())
@@ -252,7 +237,7 @@ export default class UsersController {
           let already_assigned_class = await ClassTeacherMaster.query()
             .where('division_id', division_id)
             .andWhere('staff_id', user.staff.id)
-            .andWhere('academic_session_id', acadamic_seesion.id)
+            .andWhere('academic_year', 1)
             .first()
 
           if (already_assigned_class) continue
@@ -262,7 +247,7 @@ export default class UsersController {
 
           await ClassTeacherMaster.create(
             {
-              academic_session_id: acadamic_seesion.id,
+              academic_year: 1,
               division_id: division_id,
               staff_id: user.staff.id,
               status: 'Active',
@@ -288,7 +273,7 @@ export default class UsersController {
           let already_assigned_class = await ClassTeacherMaster.query()
             .where('division_id', division_id)
             .andWhere('staff_id', user.staff.id)
-            .andWhere('academic_session_id', acadamic_seesion.id)
+            .andWhere('academic_year', 1)
             .first()
 
           if (already_assigned_class)

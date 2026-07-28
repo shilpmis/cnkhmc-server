@@ -7,7 +7,7 @@ export default class extends BaseSchema {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
       table.integer('school_id').unsigned().references('id').inTable('schools')
-      table.integer('academic_session_id').unsigned().references('id').inTable('academic_sessions')
+      table.integer('academic_year').notNullable()
       table.string('leave_type_name').notNullable() // Sick, Casual, Paid, etc
       table.boolean('is_paid').defaultTo(true)
       table.boolean('affects_payroll').defaultTo(true)

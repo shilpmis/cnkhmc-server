@@ -2,7 +2,7 @@ import vine from '@vinejs/vine'
 
 export const ValidatorForCheckIn = vine.compile(
   vine.object({
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     check_in_time: vine.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/),
   })
 )
@@ -16,7 +16,7 @@ export const ValidatorForCheckOut = vine.compile(
 export const ValidatorForAdminMarkAttendance = vine.compile(
   vine.object({
     staff_id: vine.number(),
-    academic_session_id: vine.number(),
+    academic_year: vine.number(),
     attendance_date: vine.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     check_in_time: vine.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/).optional(),
     check_out_time: vine.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/).optional(),

@@ -39,7 +39,7 @@ export default class DailyDiariesController {
       .join('school_timetable_config as stc', 'cdc.school_timetable_config_id', 'stc.id')
       .where('pc.id', inputData.periodsConfigId)
       .select(
-        'stc.academic_session_id',
+        'stc.academic_year',
         'pc.staff_enrollment_id',
         'pc.subjects_division_masters_id'
       )
@@ -56,10 +56,18 @@ export default class DailyDiariesController {
 
     // STRATEGY 1: Current user's own enrollment in this session
     if (user.staff_id) {
-      const staffEnrollment = await db.from('staff_enrollments')
+      let staffEnrollment = await db.from('staff_enrollments')
         .where('staff_id', user.staff_id)
-        .where('academic_session_id', periodDetails.academic_session_id)
+        .where('academic_year', periodDetails.academic_year)
         .first()
+        
+      if (!staffEnrollment) {
+        // Fallback: get the most recent enrollment if academic_year doesn't match
+        staffEnrollment = await db.from('staff_enrollments')
+          .where('staff_id', user.staff_id)
+          .orderBy('id', 'desc')
+          .first()
+      }
       
       if (staffEnrollment) {
         targetStaffEnrollmentId = staffEnrollment.id
@@ -108,7 +116,7 @@ export default class DailyDiariesController {
         debug: {
           role_id: user.role_id,
           staff_id: user.staff_id,
-          period_session_id: periodDetails.academic_session_id,
+          period_session_id: periodDetails.academic_year,
           period_assigned_teacher: periodDetails.staff_enrollment_id,
           subject_master_id: periodDetails.subjects_division_masters_id
         }

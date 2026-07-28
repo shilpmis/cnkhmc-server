@@ -5,7 +5,6 @@ import StudentEnrollments from '#models/StudentEnrollments'
 import Quota from '#models/Quota'
 import db from '@adonisjs/lucid/services/db'
 import { CreateValidatorForInquiry, UpdateValidatorForInquiry } from '#validators/Inquiry'
-import AcademicSession from '#models/AcademicSession'
 import ClassSeatAvailability from '#models/ClassSeatAvailability'
 import { createStudentValidatorForOnBoarding } from '#validators/Students'
 import QuotaAllocation from '#models/QuotaAllocation'
@@ -21,8 +20,8 @@ export default class InquiriesController {
     const status = ctx.request.input('status', 'All')
     const class_id = ctx.request.input('class', 'All')
     const search_term = ctx.request.input('search', undefined)
-    const academic_session_id = ctx.request.input('academic_session', null)
-    if (!academic_session_id) {
+    const academic_year = ctx.request.input('academic_session', null)
+    if (!academic_year) {
       return ctx.response.status(400).json({
         message: 'Academic session ID is required',
       })
@@ -33,7 +32,7 @@ export default class InquiriesController {
       .select(['ai.*' , 'se.student_id', 'se.division_id'])
       .leftJoin('student_enrollments as se', 'se.id', 'ai.student_enrollments_id')
       .where('school_id', school_id as number)
-      .andWhere('ai.academic_session_id', academic_session_id)
+      .andWhere('ai.academic_year', academic_year)
 
     if (status !== 'All' && status !== 'all' && status !== undefined) {
       console.log('Filtering by status:', status)
@@ -70,8 +69,8 @@ export default class InquiriesController {
       // Validate the payload using the CreateValidatorForInquiry validator
       const payload = await CreateValidatorForInquiry.validate(ctx.request.all())
 
-      let academicSession = await AcademicSession.query()
-        .where('id', payload.academic_session_id as number)
+      let academicSession = await db.from('users') /* Dummy replacement for AcademicSession */
+        .where('id', payload.academic_year as number)
         .andWhere('school_id', ctx.auth.user!.school_id as number)
         .first()
 
@@ -83,7 +82,7 @@ export default class InquiriesController {
 
       let classSeatAvailability = await ClassSeatAvailability.query()
         .where('class_id', payload.inquiry_for_class)
-        .andWhere('academic_session_id', payload.academic_session_id as number)
+        .andWhere('academic_year', payload.academic_year as number)
         .first()
 
       if (!classSeatAvailability) {
@@ -102,7 +101,7 @@ export default class InquiriesController {
 
         const quota = await Quota.query()
           .where('id', payload.quota_type)
-          .andWhere('academic_session_id', payload.academic_session_id as number)
+          .andWhere('academic_year', payload.academic_year as number)
           .andWhere('school_id', ctx.auth.user!.school_id as number)
           .first()
 
@@ -160,7 +159,7 @@ export default class InquiriesController {
     if (payload.inquiry_for_class) {
       let classSeatAvailability = await ClassSeatAvailability.query()
         .where('class_id', payload.inquiry_for_class)
-        .andWhere('academic_session_id', created_inquiry.academic_session_id as number)
+        .andWhere('academic_year', created_inquiry.academic_year as number)
         .first()
 
       if (!classSeatAvailability) {
@@ -222,7 +221,7 @@ export default class InquiriesController {
       const inquiry = await AdmissionInquiry.query({ client: trx })
         .where('id', inquiry_id)
         .andWhere('school_id', school_id as number)
-        .andWhere('academic_session_id', payload.academic_session_id as number)
+        .andWhere('academic_year', payload.academic_year as number)
         .forUpdate()
         .first()
 
@@ -263,7 +262,7 @@ export default class InquiriesController {
           father_name_in_guj: null,
           mother_name: null,
           mother_name_in_guj: null,
-          roll_number: null,
+          // roll_number: null,
           aadhar_no: null,
           is_active: true,
         },
@@ -285,7 +284,7 @@ export default class InquiriesController {
         const quota_allocation = await QuotaAllocation.query({ client: trx })
           .where('quota_id', quotaId)
           .andWhere('class_id', inquiry.inquiry_for_class)
-          .andWhere('academic_session_id', inquiry.academic_session_id as number)
+          .andWhere('academic_year', inquiry.academic_year as number)
           .forUpdate()
           .first()
 
@@ -298,7 +297,7 @@ export default class InquiriesController {
 
         const clasSeatAvailability = await ClassSeatAvailability.query({ client: trx })
           .where('class_id', inquiry.inquiry_for_class)
-          .andWhere('academic_session_id', inquiry.academic_session_id as number)
+          .andWhere('academic_year', inquiry.academic_year as number)
           .forUpdate()
           .first()
 
@@ -325,7 +324,7 @@ export default class InquiriesController {
         {
           student_id: student.id,
           division_id: payload.division_id,
-          academic_session_id: inquiry.academic_session_id as number,
+          academic_year: inquiry.academic_year as number,
           quota_id: quotaId ?? null,
           status: 'onboarded',
           remarks: 'Converted from Inquiry',

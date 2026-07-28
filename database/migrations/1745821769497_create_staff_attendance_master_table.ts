@@ -6,12 +6,10 @@ export default class extends BaseSchema {
   async up() {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
-      table.integer('academic_session_id')
+      table.integer('academic_year').notNullable()
         .unsigned()
         .notNullable()
-        .references('id')
-        .inTable('academic_sessions')
-        .onDelete('CASCADE')
+        
       table.integer('staff_id')
         .unsigned()
         .notNullable()
@@ -33,7 +31,7 @@ export default class extends BaseSchema {
       table.timestamp('updated_at', { useTz: true })
 
       // Indexes for better query performance
-      table.unique(['academic_session_id', 'staff_id', 'attendance_date'], 'staff_attendance_unique_index')
+      table.unique(['academic_year', 'staff_id', 'attendance_date'], 'staff_attendance_unique_index')
       table.index(['staff_id', 'attendance_date'])
       table.index(['status'])
     })

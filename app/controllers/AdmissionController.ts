@@ -26,7 +26,7 @@ export default class AdmissionsController {
       student_id,
       division_id: class_id,
       quota_id: selectedQuotaId,
-      academic_session_id: request.qs().academic_session_id as number,
+      academic_year: request.qs().academic_year as number,
       status: 'pursuing',
     })
     return response.created(admission)

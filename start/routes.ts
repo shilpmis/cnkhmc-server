@@ -20,7 +20,6 @@ import AttendanceController from '#controllers/AttendancesController'
 import InquiriesController from '#controllers/InquiriesController'
 import FeesController from '#controllers/FeesController'
 import OrganizationController from '#controllers/OrganizationController'
-import AcademicSessionsController from '#controllers/AcademicSessionController'
 import StaffController from '#controllers/StaffController'
 import ClassSeatAvailabilitiesController from '#controllers/ClassSeatAvailabilitiesController'
 import QuotasController from '#controllers/QuotaController'
@@ -40,6 +39,9 @@ import LessonPlanController from '#controllers/lesson_plans_controller'
 import DailyDiaryController from '#controllers/daily_diaries_controller'
 import ChatController from '#controllers/ChatController'
 import StaffConfigurationsController from '#controllers/StaffConfigurationsController'
+import DeadStocksController from '#controllers/dead_stocks_controller'
+import DeadStockTransactionsController from '#controllers/dead_stock_transactions_controller'
+import InventoryDepartmentsController from '#controllers/inventory_departments_controller'
 
 router
   .group(() => {
@@ -75,11 +77,18 @@ router
     router.get('/school/:school_id', [SchoolsController, 'index'])
     router.put('/school/:school_id', [SchoolsController, 'update'])
 
-    router.post('/academic-session', [AcademicSessionsController, 'createAcademicSessionForSchool'])
-    router.put('/academic-session/:id', [
-      AcademicSessionsController,
-      'updateAcademicSessionForSchool',
-    ])
+    // AcademicSession routes removed - AcademicSessionsController no longer exists
+    // router.post('/academic-session', [AcademicSessionsController, 'createAcademicSessionForSchool'])
+    // router.put('/academic-session/:id', [
+    //   AcademicSessionsController,
+    //   'updateAcademicSessionForSchool',
+    // ])
+    // router.get('/academic-sessions/:school_id', [
+    //   AcademicSessionsController,
+    //   'getAllAcademicSessionInSchool',
+    // ])
+    // router.delete('/academic-session/:id', [AcademicSessionsController, 'deleteAcademicSession'])
+
     router.get('/academic-calendar-settings/:academic_session_id', [
       AcademicCalendarSettingsController,
       'getSettings',
@@ -88,11 +97,6 @@ router
       AcademicCalendarSettingsController,
       'upsertSettings',
     ])
-    router.get('/academic-sessions/:school_id', [
-      AcademicSessionsController,
-      'getAllAcademicSessionInSchool',
-    ])
-    // router.delete('/academic-session/:id', [AcademicSessionsController, 'deleteAcademicSession'])
 
     router.get('/users', [UsersController, 'indexSchoolUsers'])
     router.post('/user', [UsersController, 'createUser'])
@@ -117,7 +121,7 @@ router
     router.get('student/search', [GlobalSearchController, 'getStuentSearchResults'])
     router.get('staff/search', [GlobalSearchController, 'getStaffSearchResults'])
 
-    router.get('students/:academic_session_id/:division_id', [
+    router.get('students/:academic_year/:division_id', [
       StundetsController,
       'indexClassStudents',
     ])
@@ -128,11 +132,11 @@ router
     router.post('student', [StundetsController, 'createSingleStudent'])
     router.post('students/multiple/:class_id', [StundetsController, 'createMultipleStudents'])
     router.put('student/:student_id', [StundetsController, 'updateStudents'])
-    router.post('students/bulk-upload/:academic_session_id/:division_id', [
+    router.post('students/bulk-upload/:academic_year/:division_id', [
       StundetsController,
       'bulkUploadStudents',
     ])
-    router.post('students/export/:academic_session_id/:class_id', [
+    router.post('students/export/:academic_year/:class_id', [
       StundetsController,
       'exportToExcel',
     ])
@@ -146,6 +150,7 @@ router
     router.get('staff/:id', [StaffController, 'findStaffById'])
     router.post('staff', [StaffController, 'createStaff'])
     router.put('staff/:staff_id', [StaffController, 'updateStaff'])
+    router.delete('staff/:staff_id', [StaffController, 'destroyStaff'])
     router.post('staff/bulk-upload', [StaffController, 'bulkUploadStaff'])
     router.post('staff/export/:school_id/:academic_session_id/', [StaffController, 'exportToExcel'])
     
@@ -351,7 +356,7 @@ router
     router.post('subject/assign/staffs', [SubjectController, 'assignStaffToSubject'])
 
     // time table
-    router.get('timetable/config/:academic_session_id', [
+    router.get('timetable/config/:academic_year', [
       TimeTableController,
       'getSchoolTimeTableConfig',
     ])
@@ -379,6 +384,7 @@ router
     router.put('timetable/config/class/day/:class_id/:class_day_config_id', [TimeTableController ,'updateClassDayConfig'])
     router.delete('timetable/config/class/day/:id', [TimeTableController ,'deleteClassDayConfig'])
     router.get('timetable/teacher', [TimeTableController, 'getTeacherTimetable'])
+    router.get('timetable/teacher/availability', [TimeTableController, 'getTeacherAvailability'])
     router.get('timetable/:division_id', [TimeTableController ,'fetchTimeTableForDivision'])
     router.get('timetable/export/:division_id', [TimeTableController ,'exportTimeTablePDF'])
     router.post('timetable/verify/config/period', [TimeTableController ,'checkAvailabilityForConfiguredPeriod'])
@@ -400,6 +406,8 @@ router
     router.delete('lesson-plans/subject/:subjectId', [LessonPlanController, 'deleteBySubject'])
     router.patch('lesson-plans/topics/:id/status', [LessonPlanController, 'updateTopicStatus'])
     router.patch('lesson-plans/subtopics/:id/status', [LessonPlanController, 'updateSubtopicStatus'])
+    router.put('lesson-plans/topics/:id/assign', [LessonPlanController, 'assignTopicToTeacher'])
+    router.put('lesson-plans/subtopics/:id/assign', [LessonPlanController, 'assignSubtopicToTeacher'])
     router.get('lesson-plans/export/:subjectId/:lpNumber', [LessonPlanController, 'exportLP'])
 
     // Daily Diaries
@@ -431,6 +439,24 @@ router
     router.post('/chat/rooms/:id/members', [ChatController, 'addMembers'])
     router.delete('/chat/rooms/:id/members/:userId', [ChatController, 'removeMember'])
     router.post('/chat/rooms/:id/read', [ChatController, 'markRead'])
+
+    // Dead Stock Management
+    router.get('dead-stocks', [DeadStocksController, 'index'])
+    router.post('dead-stocks', [DeadStocksController, 'store'])
+    router.get('dead-stocks/:id', [DeadStocksController, 'show'])
+
+    // Dead Stock Transactions
+    router.post('dead-stocks/issue', [DeadStockTransactionsController, 'issue'])
+    router.post('dead-stocks/return', [DeadStockTransactionsController, 'returnStock'])
+    router.post('dead-stocks/discard', [DeadStockTransactionsController, 'discard'])
+    router.post('dead-stocks/transfer', [DeadStockTransactionsController, 'transfer'])
+
+    // Inventory Departments
+    router.get('inventory-departments', [InventoryDepartmentsController, 'index'])
+    router.post('inventory-departments', [InventoryDepartmentsController, 'store'])
+    router.get('inventory-departments/:id', [InventoryDepartmentsController, 'show'])
+    router.put('inventory-departments/:id', [InventoryDepartmentsController, 'update'])
+    router.delete('inventory-departments/:id', [InventoryDepartmentsController, 'destroy'])
   })
   .prefix('/api/v1/')
   .use(middleware.auth())
