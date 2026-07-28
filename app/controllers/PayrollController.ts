@@ -1,4 +1,4 @@
-﻿import SalaryComponents from '#models/SalaryComponents'
+import SalaryComponents from '#models/SalaryComponents'
 import SalaryTemplates from '#models/SalaryTemplates'
 import SatffPayrunComponents from '#models/SatffPayrunComponents'
 import SatffPayrunTemplates from '#models/SatffPayrunTemplates'
@@ -6,6 +6,8 @@ import StaffEnrollment from '#models/StaffEnrollment'
 import StaffSalaryTemplates from '#models/StaffSalaryTemplates'
 import StaffTemplateComponents from '#models/StaffTemplateComponents'
 import TemplateComponents from '#models/TemplateComponents'
+import PayrollSetting from '#models/payroll_setting'
+import StaffLeaveApplication from '#models/StaffLeaveApplication'
 import {
   CreatePayRunTemplateValidator,
   CreateValidatorForSalaryComponent,
@@ -1007,7 +1009,7 @@ export default class PayrollController {
       .preload('staff_salary_templates')
       .where('academic_year', accademic_session.id)
       .andWhereNot('status', 'Resigned')
-      .paginate(ctx.request.input('page', 1), 10)
+      .paginate(ctx.request.input('page', 1), ctx.request.input('limit', 10))
 
     return ctx.response.status(201).json(staff_with_salary_templates)
   }
@@ -1043,21 +1045,66 @@ export default class PayrollController {
     let trx = await db.transaction()
     try {
       let added_payroll_components: SatffPayrunComponents[] = []
+      
+      // Calculate LOP (Loss of Pay) if settings exist
+      let settings = await PayrollSetting.query()
+        .where('school_id', ctx.auth.user!.school_id as number)
+        .preload('taxSlabs')
+        .first()
+      
+      let lopAmount = 0
+      if (settings) {
+        // Fetch approved unpaid leaves in the current month and year
+        const leaves = await StaffLeaveApplication.query()
+          .where('staff_id', satff_enrollment.staff_id)
+          .andWhere('status', 'approved')
+          .preload('leave_type', (q) => q.where('is_paid', false))
+        
+        let unpaidDays = 0;
+        for (const leave of leaves) {
+          if (leave.leave_type && !leave.leave_type.is_paid) {
+            // Check if the leave falls in the given payroll_month and payroll_year
+            const fromDate = new Date(leave.from_date);
+            const toDate = new Date(leave.to_date);
+            const payrollMonth = Number(other_paylaod.payroll_month) - 1; // 0-indexed month
+            const payrollYear = Number(other_paylaod.payroll_year);
+            
+            // Simplified check: if either from_date or to_date is in the month
+            if ((fromDate.getMonth() === payrollMonth && fromDate.getFullYear() === payrollYear) ||
+                (toDate.getMonth() === payrollMonth && toDate.getFullYear() === payrollYear)) {
+              unpaidDays += leave.number_of_days;
+            }
+          }
+        }
 
-      // let total_payroll = 0
-      // let anuaual_ctc = other_paylaod.based_anual_ctc
-      // let basic_pay_component = satff_enrollment.staff_salary_templates.template_components.find(
-      //   (temp_component) => temp_component.salary_component.is_based_on_annual_ctc
-      // )
-      // if (!basic_pay_component) {
-      //   return ctx.response.status(422).json({ message: 'Basic pay component not found' })
-      // }
+        if (unpaidDays > 0) {
+          // Calculate LOP Base Amount
+          let baseAmount = 0;
+          if (settings.lopCalculationBase === 'Basic Salary') {
+            const basicPayComponent = satff_enrollment.staff_salary_templates.template_components.find(
+              (temp_component) => temp_component.salary_component.component_code === 'BASIC'
+            );
+            
+            if (basicPayComponent) {
+              baseAmount = basicPayComponent.percentage
+                ? (other_paylaod.based_anual_ctc / 12) * (basicPayComponent.percentage / 100)
+                : (basicPayComponent.amount || 0);
+            }
+          } else {
+            // Gross Salary
+            baseAmount = other_paylaod.based_anual_ctc / 12;
+          }
+          
+          let denominator = 30; // Default to Fixed 30 Days
+          if (settings.lopDaysDenominator === 'Actual Days in Month') {
+            denominator = new Date(Number(other_paylaod.payroll_year), Number(other_paylaod.payroll_month), 0).getDate();
+          }
 
-      // let basic_pay = basic_pay_component.percentage
-      //   ? other_paylaod.based_anual_ctc * (basic_pay_component.percentage / 100)
-      //   : basic_pay_component.amount;
-
-      //   total_payroll =
+          lopAmount = (baseAmount / denominator) * unpaidDays;
+          
+          // Optionally you can automatically inject this LOP as a deduction component if the frontend hasn't done it
+        }
+      }
 
       let pay_run_tmp = await SatffPayrunTemplates.create(
         {
@@ -1067,12 +1114,138 @@ export default class PayrollController {
           template_name: other_paylaod.template_name,
           template_code: other_paylaod.template_code,
           based_anual_ctc: other_paylaod.based_anual_ctc,
-          total_payroll: other_paylaod.total_payroll,
+          total_payroll: other_paylaod.total_payroll - lopAmount, // Subtract LOP from total_payroll
           notes: other_paylaod.notes,
           status: 'draft',
         },
         { client: trx }
       )
+
+      if (lopAmount > 0) {
+        // We can manually add an LOP deduction to the components
+        // Assuming we just append it or we can find if there is an LOP component
+        let lopComponent = await SalaryComponents.query()
+          .where('school_id', ctx.auth.user!.school_id as number)
+          .andWhere('component_code', 'LOP')
+          .first()
+        
+        if (lopComponent) {
+          let payrun_lop_comp = await SatffPayrunComponents.create(
+            {
+              salary_components_id: lopComponent.id,
+              amount: lopAmount,
+              percentage: null,
+              satff_payrun_templates_id: pay_run_tmp.id,
+            },
+            { client: trx }
+          )
+          added_payroll_components.push(payrun_lop_comp)
+        }
+      }
+
+      // Calculate Statutory Deductions (EPF, ESI)
+      if (settings) {
+        // Calculate EPF
+        if (settings.epfEmployeePercentage && settings.epfEmployeePercentage > 0) {
+          let epfComponent = await SalaryComponents.query()
+            .where('school_id', ctx.auth.user!.school_id as number)
+            .andWhere('component_code', 'EPF')
+            .first()
+          
+          if (epfComponent) {
+            let epfBase = other_paylaod.based_anual_ctc / 12; // In reality, this might be only basic salary depending on EPF rules, but let's use gross or we can check if it's based on basic
+            const basicPayComponent = satff_enrollment.staff_salary_templates.template_components.find(
+              (temp_component) => temp_component.salary_component.component_code === 'BASIC'
+            );
+            if (basicPayComponent) {
+              epfBase = basicPayComponent.percentage
+                ? (other_paylaod.based_anual_ctc / 12) * (basicPayComponent.percentage / 100)
+                : (basicPayComponent.amount || 0);
+            }
+            
+            // Limit EPF base if needed (usually 15000 in India)
+            const epfAmount = epfBase * (settings.epfEmployeePercentage / 100);
+            
+            let payrun_epf_comp = await SatffPayrunComponents.create(
+              {
+                salary_components_id: epfComponent.id,
+                amount: epfAmount,
+                percentage: null,
+                satff_payrun_templates_id: pay_run_tmp.id,
+              },
+              { client: trx }
+            )
+            added_payroll_components.push(payrun_epf_comp)
+            
+            // Deduct EPF from total payout if it wasn't already
+            pay_run_tmp.total_payroll -= epfAmount;
+          }
+        }
+
+        // Calculate ESI
+        if (settings.esiEmployeePercentage && settings.esiEmployeePercentage > 0) {
+          let esiComponent = await SalaryComponents.query()
+            .where('school_id', ctx.auth.user!.school_id as number)
+            .andWhere('component_code', 'ESI')
+            .first()
+            
+          if (esiComponent) {
+            let esiBase = other_paylaod.based_anual_ctc / 12; // ESI is usually on Gross
+            const esiAmount = esiBase * (settings.esiEmployeePercentage / 100);
+            
+            let payrun_esi_comp = await SatffPayrunComponents.create(
+              {
+                salary_components_id: esiComponent.id,
+                amount: esiAmount,
+                percentage: null,
+                satff_payrun_templates_id: pay_run_tmp.id,
+              },
+              { client: trx }
+            )
+            added_payroll_components.push(payrun_esi_comp)
+            
+            // Deduct ESI from total payout
+            pay_run_tmp.total_payroll -= esiAmount;
+          }
+        }
+        
+        // Calculate Professional Tax
+        if (settings.taxSlabs && settings.taxSlabs.length > 0) {
+          const grossMonthly = other_paylaod.based_anual_ctc / 12;
+          let ptAmount = 0;
+          for (const slab of settings.taxSlabs) {
+            if (grossMonthly >= slab.minSalary && (slab.maxSalary === null || grossMonthly <= slab.maxSalary)) {
+              ptAmount = slab.taxAmount;
+              break;
+            }
+          }
+          
+          if (ptAmount > 0) {
+            let ptComponent = await SalaryComponents.query()
+              .where('school_id', ctx.auth.user!.school_id as number)
+              .andWhere('component_code', 'PT')
+              .first()
+              
+            if (ptComponent) {
+              let payrun_pt_comp = await SatffPayrunComponents.create(
+                {
+                  salary_components_id: ptComponent.id,
+                  amount: ptAmount,
+                  percentage: null,
+                  satff_payrun_templates_id: pay_run_tmp.id,
+                },
+                { client: trx }
+              )
+              added_payroll_components.push(payrun_pt_comp)
+              
+              // Deduct PT from total payout
+              pay_run_tmp.total_payroll -= ptAmount;
+            }
+          }
+        }
+        
+        await pay_run_tmp.save();
+      }
 
       console.log('payroll_components', payroll_components)
       for (let i = 0; i < payroll_components.length; i++) {

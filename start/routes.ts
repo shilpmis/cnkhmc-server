@@ -42,6 +42,7 @@ import StaffConfigurationsController from '#controllers/StaffConfigurationsContr
 import DeadStocksController from '#controllers/dead_stocks_controller'
 import DeadStockTransactionsController from '#controllers/dead_stock_transactions_controller'
 import InventoryDepartmentsController from '#controllers/inventory_departments_controller'
+import PayrollSettingsController from '#controllers/payroll_settings_controller'
 
 router
   .group(() => {
@@ -208,6 +209,10 @@ router
       PayrollController,
       'deleteSalaryComponent',
     ])
+
+    // payroll settings
+    router.get('/payroll/settings', [PayrollSettingsController, 'getSettings'])
+    router.put('/payroll/settings', [PayrollSettingsController, 'updateSettings'])
 
     router.get('/payroll/salary-template', [PayrollController, 'indexSalaryTemplates'])
     router.get('/payroll/salary-template/:template_id', [
