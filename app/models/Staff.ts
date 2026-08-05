@@ -25,6 +25,9 @@ export default class Staff extends Base {
   declare middle_name: string | null
 
   @column()
+  declare title: string | null
+
+  @column()
   declare last_name: string
 
   // DB column: short_name (matches)
@@ -59,6 +62,9 @@ export default class Staff extends Base {
 
   @column()
   declare registration_authority: string | null
+
+  @column()
+  declare designation_on_doa: string | null
 
   // DB column: branch_details (added by new migration)
   @column()
@@ -103,6 +109,9 @@ export default class Staff extends Base {
 
   @column()
   declare address: string | null
+
+  @column()
+  declare permanent_address: string | null
 
   @column()
   declare district: string | null

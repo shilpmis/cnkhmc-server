@@ -2,6 +2,7 @@ import { DateTime } from 'luxon'
 import type { HttpContext } from '@adonisjs/core/http'
 import Staff from '#models/Staff'
 import { CreateValidatorForStaff, UpdateValidatorForStaff } from '#validators/Staff'
+import { CreateValidatorForBulkUpload } from '#validators/Teachers'
 import StaffMaster from '#models/StaffMaster'
 import db from '@adonisjs/lucid/services/db'
 import StaffEnrollment from '#models/StaffEnrollment'
@@ -371,10 +372,14 @@ export default class StaffController {
   private mapExcelHeadersToFields(data: any): any {
     const mapping: Record<string, string> = {
       'Staff Name': 'full_name',
+      'Name': 'full_name',
+      'Title': 'title',
       'Short Name': 'short_name',
       'Date of Birth': 'birth_date',
       'DOB': 'birth_date',
       'Current Address': 'address',
+      'Permenant Address': 'permanent_address',
+      'Permanent Address': 'permanent_address',
       'Pin code No.': 'postal_code',
       'Mobile No.': 'mobile_number',
       'Mobile number': 'mobile_number',
@@ -393,19 +398,22 @@ export default class StaffController {
       'Staff Category': 'staff_category',
       'Department': 'department',
       'Nature of appointment': 'nature_of_appointment',
+      'Designation on the DOA': 'designation_on_doa',
       'Date Of Appointment': 'appointment_date',
       'Date of Joining': 'joining_date',
       'DOJ': 'joining_date',
       'Date Of Promotion': 'promotion_date',
+      'Experience till Date': 'total_experience',
       'Blood Group': 'blood_group',
       'Qualification': 'qualification',
       'Registration Authority': 'registration_authority',
       'State Council Registration No.': 'ayush_registration_no',
-      'Registration Number': 'ayush_registration_no',
-      'Registration Date': 'date_of_registration',
+      'Registration Number': 'registration_number',
+      'Registration Date': 'registration_date',
       'Council Name': 'council_name',
-      'Ayush Teacher Code': 'teacher_code',
-      'Ayush Teachers Code': 'teacher_code',
+      'Name Of Council': 'council_name',
+      'Ayush Teacher Code': 'ayush_teacher_code',
+      'Ayush Teachers Code': 'ayush_teacher_code',
       'MD Subject Name': 'md_subject',
       'Qulification College': 'qualification_college',
       'Qulification University': 'qualification_university',
@@ -415,8 +423,8 @@ export default class StaffController {
       'Bank IFSC Code': 'IFSC_code',
       'IFSC Code': 'IFSC_code',
       'Bank Name': 'bank_name',
-      'Branch Address/Number/email': 'bank_branch_name',
-      'Branch Name': 'bank_branch_name',
+      'Branch Address/Number/email': 'branch_details',
+      'Branch Name': 'branch_details',
       'Aadhar Number': 'aadhar_no',
       'Aadhar Card': 'aadhar_no',
       'PAN Card Number': 'pan_card_no',
@@ -632,41 +640,31 @@ export default class StaffController {
             })
           }
 
-          const validatedStaff = await CreateValidatorForStaff.validate({
+          const validatedStaff = await CreateValidatorForBulkUpload.validate({
             ...data,
             staff_role_id: role.id,
           })
 
           const {
-            remarks: _remarks,
-            teacher_code,
-            ayush_registration_no,
-            date_of_registration,
             university_approval_letter_no,
             university_approval_date,
-            bank_branch_name,
-            experience_years,
             ...staffPayload
-          } = validatedStaff
+          } = validatedStaff as any
 
           const staff = await Staff.create(
             {
-              ...(staffPayload as any),
-              ayush_teacher_code: teacher_code,
-              registration_number: ayush_registration_no,
-              registration_date: date_of_registration,
+              ...staffPayload,
               uni_approval_number: university_approval_letter_no,
               uni_approval_date: university_approval_date,
-              branch_details: bank_branch_name,
               is_teching_staff: role.is_teaching_role,
               is_teaching_role: role.is_teaching_role,
               staff_role_id: role.id,
               school_id: school_id as number,
-              employee_code: 'EMP' + Math.floor(1000 + Math.random() * 9000),
+              employee_code: staffPayload.employee_code || 'EMP' + Math.floor(1000 + Math.random() * 9000),
               short_name:
                 staffPayload.short_name || `${staffPayload.first_name} ${staffPayload.last_name}`,
               department: staffPayload.department || 'General',
-              total_experience: experience_years || 0,
+              total_experience: staffPayload.total_experience || 0,
             },
             { client: trx }
           )
