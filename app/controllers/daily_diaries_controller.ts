@@ -1,5 +1,7 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import DailyDiary from '#models/DailyDiary'
+import DiaryLogPermission from '#models/DiaryLogPermission'
+import LessonPlanTopic from '#models/LessonPlanTopic'
 import db from '@adonisjs/lucid/services/db'
 import { DateTime } from 'luxon'
 
@@ -17,6 +19,7 @@ export default class DailyDiariesController {
       'attendanceRemarks',
       'topicIds',
       'subtopicIds',
+      'topicDurations',
       'conclusion',
       'referenceBook',
       'attendance'
@@ -27,9 +30,22 @@ export default class DailyDiariesController {
     if (user.role_id === 6 || user.role_id === 10) {
       const todayStr = DateTime.now().toISODate() // 'YYYY-MM-DD'
       if (inputData.date !== todayStr) {
-        return response.badRequest({
-          message: 'Daily diary can only be logged for the current day. Retrospective or future logging is not permitted.'
-        })
+        let hasPermission = false
+        if (user.staff_id) {
+          const permission = await DiaryLogPermission.query()
+            .where('staff_id', user.staff_id)
+            .where('date', inputData.date)
+            .first()
+          if (permission) {
+            hasPermission = true
+          }
+        }
+        
+        if (!hasPermission) {
+          return response.badRequest({
+            message: 'Daily diary can only be logged for the current day. Retrospective or future logging is not permitted unless granted permission.'
+          })
+        }
       }
     }
 
@@ -134,14 +150,63 @@ export default class DailyDiariesController {
       attendance: inputData.attendance || null,
       staffEnrollmentId: targetStaffEnrollmentId,
       topicIds: inputData.topicIds || [],
-      subtopicIds: inputData.subtopicIds || []
+      subtopicIds: inputData.subtopicIds || [],
+      topicDurations: inputData.topicDurations || {}
     }
 
-    // Upsert logic
+    // Fetch existing daily diary entry
     const existing = await DailyDiary.query()
       .where('periodsConfigId', data.periodsConfigId)
       .where('date', data.date)
       .first()
+
+    const topicDurations = data.topicDurations
+    const oldTopicDurations = existing ? (existing.topicDurations || {}) : {}
+
+    // Validation and calculate diffs
+    const topicDiffs = new Map<number, number>()
+    
+    // Check new durations
+    for (const [topicIdStr, newDuration] of Object.entries(topicDurations)) {
+      const topicId = Number(topicIdStr)
+      const duration = Number(newDuration)
+      if (isNaN(duration) || isNaN(topicId)) continue
+      
+      const oldDuration = Number(oldTopicDurations[topicIdStr as keyof typeof oldTopicDurations]) || 0
+      const diff = duration - oldDuration
+      if (diff !== 0) {
+        topicDiffs.set(topicId, diff)
+      }
+    }
+    
+    // Check removed topics
+    for (const [topicIdStr, oldDuration] of Object.entries(oldTopicDurations)) {
+      if (topicDurations[topicIdStr as keyof typeof topicDurations] === undefined) {
+        const topicId = Number(topicIdStr)
+        const duration = Number(oldDuration)
+        if (!isNaN(topicId) && !isNaN(duration)) {
+          topicDiffs.set(topicId, -duration)
+        }
+      }
+    }
+
+    const topicsToUpdate = []
+    for (const [topicId, diff] of topicDiffs.entries()) {
+      const topic = await LessonPlanTopic.find(topicId)
+      if (!topic) continue
+
+      if (topic.completedHours + diff > topic.requiredHours) {
+        return response.badRequest({ message: `Cannot log additional hours for topic "${topic.name}". It exceeds the required ${topic.requiredHours} hours.` })
+      }
+      topicsToUpdate.push({ topic, diff })
+    }
+
+    // Apply updates to topics
+    for (const update of topicsToUpdate) {
+      update.topic.completedHours = Math.max(0, update.topic.completedHours + update.diff)
+      update.topic.isCompleted = update.topic.completedHours >= update.topic.requiredHours
+      await update.topic.save()
+    }
 
     let diary: DailyDiary
     let isCreated = false

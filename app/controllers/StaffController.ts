@@ -21,7 +21,6 @@ export default class StaffController {
   async indexStaff(ctx: HttpContext) {
     try {
       const type = ctx.request.input('type', 'all')
-      const academic_session_id = ctx.request.input('academic_sessions')
       const page = ctx.request.input('page', 1)
       const perPage = 10
       const alldata = ctx.request.input('alldata', false)

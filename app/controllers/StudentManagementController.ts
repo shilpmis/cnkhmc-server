@@ -15,7 +15,6 @@ export default class StudentManagementController {
    */
 
   public async indexStudentForManagement(ctx: HttpContext) {
-    let school_id = ctx.auth.user?.school_id
     let division = ctx.params.division_id;
 
     let academic_year = ctx.request.qs().academic_session

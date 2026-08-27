@@ -9,7 +9,7 @@ import db from '@adonisjs/lucid/services/db'
 import path from 'node:path'
 import fs from 'node:fs'
 // @ts-ignore
-import PdfPrinterPkg from 'pdfmake/js/printer.js'
+import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 
 export default class BenchmarkExport extends BaseCommand {

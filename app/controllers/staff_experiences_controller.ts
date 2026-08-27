@@ -3,6 +3,7 @@ import Staff from '#models/Staff'
 import StaffExperience from '#models/staff_experience'
 import * as xlsx from 'xlsx'
 import { DateTime } from 'luxon'
+import fs from 'node:fs/promises'
 
 export default class StaffExperiencesController {
   public async bulkUpload({ request, response }: HttpContext) {
@@ -21,7 +22,7 @@ export default class StaffExperiencesController {
       }
 
       // Read file into memory (requires obtaining the buffer or reading from temp path)
-      const buffer = await require('fs').promises.readFile(file.tmpPath)
+      const buffer = await fs.readFile(file.tmpPath!)
       const workbook = xlsx.read(buffer, { type: 'buffer' })
 
       const unmatchedStaff: string[] = []
@@ -31,7 +32,7 @@ export default class StaffExperiencesController {
         // Assume sheetName is something like "John Doe" or "John M Doe"
         // Let's do a simple fuzzy match or exact match on name
         const staff = await Staff.query()
-          .whereRaw('LOWER(CONCAT(first_name, " ", COALESCE(middle_name, ""), " ", last_name)) LIKE ?', [`%${sheetName.toLowerCase().replace(/\s+/g, '%')}%`])
+          .whereRaw('LOWER(CONCAT(first_name, \' \', COALESCE(middle_name, \'\'), \' \', last_name)) LIKE ?', [`%${sheetName.toLowerCase().replace(/\s+/g, '%')}%`])
           .first()
 
         let resolvedStaff = staff
@@ -39,7 +40,7 @@ export default class StaffExperiencesController {
         if (!resolvedStaff) {
           // If we still can't find, try exact match ignoring middle name
            const staffWithoutMiddle = await Staff.query()
-            .whereRaw('LOWER(CONCAT(first_name, " ", last_name)) = ?', [sheetName.toLowerCase().trim()])
+            .whereRaw('LOWER(CONCAT(first_name, \' \', last_name)) = ?', [sheetName.toLowerCase().trim()])
             .first()
            
            if (!staffWithoutMiddle) {
@@ -126,7 +127,8 @@ export default class StaffExperiencesController {
         unmatched_staff: unmatchedStaff
       })
     } catch (error) {
-      return response.internalServerError({ message: error.message || 'An error occurred during upload' })
+      console.error(error)
+      return response.internalServerError({ message: error.message || 'An error occurred during upload', stack: error.stack })
     }
   }
 }

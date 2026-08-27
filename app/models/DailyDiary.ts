@@ -42,6 +42,14 @@ export default class DailyDiary extends Base {
   declare topicIds: number[] | null
 
   @column({ 
+    columnName: 'topic_durations',
+    consume: (value) => value ? (typeof value === 'string' ? JSON.parse(value) : value) : {},
+    prepare: (value) => value ? JSON.stringify(value) : null
+  })
+  declare topicDurations: Record<string, number> | null
+
+
+  @column({ 
     columnName: 'subtopic_ids',
     consume: (value) => value ? (typeof value === 'string' ? JSON.parse(value) : value) : [],
     prepare: (value) => value ? JSON.stringify(value) : null

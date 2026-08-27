@@ -9,7 +9,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
 import SubjectDivisionMaster from '#models/SubjectDivisionMaster'
 // @ts-ignore
-import PdfPrinterPkg from 'pdfmake/js/printer.js'
+import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 import fs from 'node:fs'
 import path from 'node:path'

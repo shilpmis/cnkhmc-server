@@ -32,6 +32,11 @@ const IMPORTER = (filePath: string) => {
   }
   return import(filePath)
 }
+const runnerHooks = {
+  setup: [] as any[],
+  teardown: [] as any[],
+}
+const config = {}
 
 new Ignitor(APP_ROOT, { importer: IMPORTER })
   .tap((app) => {

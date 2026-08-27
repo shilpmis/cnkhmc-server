@@ -163,7 +163,7 @@ export default class OtherStaffsController {
 
                 console.log("validatedData", validatedData);
                 // Insert only if all records are valid
-                const teachers = await OtherStaff.createMany(validatedData, { client: trx });
+                const teachers = await OtherStaff.createMany(validatedData as any, { client: trx });
 
                 // Commit the transaction
                 await trx.commit();

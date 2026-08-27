@@ -20,6 +20,9 @@ export default class LessonPlanTopic extends Base {
   declare requiredHours: number
 
   @column()
+  declare completedHours: number
+
+  @column()
   declare isCompleted: boolean
 
   @column()

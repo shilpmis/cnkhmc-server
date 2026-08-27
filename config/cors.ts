@@ -8,6 +8,7 @@ import { defineConfig } from '@adonisjs/cors'
  */
 const corsConfig = defineConfig({
   enabled: true,
+  // origin: ['http://localhost:5174', 'https://saral-university.web.app'], // Add your exact frontend deployed URL here if `true` doesn't work for credentials
   origin: true,
   methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH'],
   headers: true,

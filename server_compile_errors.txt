@@ -1,0 +1,17 @@
+﻿
+> cnkhmc-server@1.0.0 typecheck
+> tsc --noEmit
+
+app/controllers/LeavesController.ts(539,17): error TS6133: 'currentYear' is declared but its value is never read.
+app/controllers/lesson_plans_controller.ts(134,13): error TS6133: 'contentCol' is declared but its value is never read.
+app/controllers/OtherStaffsController.ts(166,62): error TS2345: Argument of type '{ school_id: any; staff_role_id: number; email?: string | null | undefined; address?: string | null | undefined; state?: string | null | undefined; department?: string | null | undefined; ... 55 more ...; employment_status?: string | ... 1 more ... | undefined; }[]' is not assignable to parameter of type 'Partial<{ school_id: number; email: string | null; id: number; createdAt: DateTime<boolean>; updatedAt: DateTime<boolean>; address: string | null; city: string | null; ... 23 more ...; employment_status: string; }>[]'.
+  Type '{ school_id: any; staff_role_id: number; email?: string | null | undefined; address?: string | null | undefined; state?: string | null | undefined; department?: string | null | undefined; ... 55 more ...; employment_status?: string | ... 1 more ... | undefined; }' is not assignable to type 'Partial<{ school_id: number; email: string | null; id: number; createdAt: DateTime<boolean>; updatedAt: DateTime<boolean>; address: string | null; city: string | null; ... 23 more ...; employment_status: string; }>'.
+    Types of property 'category' are incompatible.
+      Type 'string | null | undefined' is not assignable to type '"ST" | "SC" | "OBC" | "OPEN" | undefined'.
+        Type 'null' is not assignable to type '"ST" | "SC" | "OBC" | "OPEN" | undefined'.
+app/controllers/StaffController.ts(24,13): error TS6133: 'academic_session_id' is declared but its value is never read.
+app/controllers/StudentManagementController.ts(18,9): error TS6133: 'school_id' is declared but its value is never read.
+app/models/DiaryLogPermission.ts(1,1): error TS6133: 'DateTime' is declared but its value is never read.
+bin/test.ts(50,10): error TS2304: Cannot find name 'config'.
+bin/test.ts(52,16): error TS2304: Cannot find name 'runnerHooks'.
+bin/test.ts(53,19): error TS2304: Cannot find name 'runnerHooks'.

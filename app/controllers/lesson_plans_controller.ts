@@ -9,7 +9,7 @@ import ExcelJS from 'exceljs'
 import path from 'node:path'
 import app from '@adonisjs/core/services/app'
 // @ts-ignore
-import PdfPrinterPkg from 'pdfmake/js/printer.js'
+import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 import fs from 'node:fs'
 
@@ -131,7 +131,6 @@ export default class LessonPlanController {
         const row = worksheet.getRow(r)
         const tmpMap: Record<string, number> = {}
         let hits = 0
-        let contentCol = 0
 
         for (let c = 1; c <= 20; c++) {
           const raw = getCellValue(row.getCell(c))
@@ -140,22 +139,22 @@ export default class LessonPlanController {
           if (HEADER_KEYWORDS.some(k => clean.includes(k))) hits++
 
           // Map semantic columns – order matters (most specific first)
-          if (['sino', 'slno', 'srno', 'code', 'sno'].some(k => clean === k))         tmpMap.code = c
-          if (['topic', 'topicname', 'subjectarea'].some(k => clean.includes(k)))      tmpMap.topicName = c
-          if (clean.includes('content'))                                                 tmpMap.content = c
-          if (['competency', 'domainofcompetency'].some(k => clean.includes(k)))       tmpMap.competency = c
+          if (['sino', 'slno', 'srno', 'code', 'sno'].some(k => clean === k)) tmpMap.code = c
+          if (['topic', 'topicname', 'subjectarea'].some(k => clean.includes(k))) tmpMap.topicName = c
+          if (clean.includes('content')) tmpMap.content = c
+          if (['competency', 'domainofcompetency'].some(k => clean.includes(k))) tmpMap.competency = c
           if (['slo', 'specificlearningobjective', 'outcome', 'detail'].some(k => clean.includes(k))) tmpMap.outcome = c
-          if (['hours', 'hour', 'nohrs', 'nofhrs'].some(k => clean.includes(k)))      tmpMap.hours = c
-          if (['lp', 'lesson', 'lession'].some(k => clean.includes(k)))               tmpMap.lpNumber = c
-          if (clean.includes('miller'))                                                  tmpMap.miller = c
-          if (clean.includes('bloom') || clean.includes('guilbert'))                    tmpMap.bloom = c
-          if (clean.includes('priority'))                                                tmpMap.priority = c
+          if (['hours', 'hour', 'nohrs', 'nofhrs'].some(k => clean.includes(k))) tmpMap.hours = c
+          if (['lp', 'lesson', 'lession'].some(k => clean.includes(k))) tmpMap.lpNumber = c
+          if (clean.includes('miller')) tmpMap.miller = c
+          if (clean.includes('bloom') || clean.includes('guilbert')) tmpMap.bloom = c
+          if (clean.includes('priority')) tmpMap.priority = c
           if (['tlmm', 'tlmethods', 'teachingmethod', 'methods'].some(k => clean.includes(k))) tmpMap.tlMm = c
           if (clean.includes('assessment') || clean.includes('formative') || clean.includes('summative')) {
             if (!tmpMap.assessment) tmpMap.assessment = c
             else tmpMap.assessment2 = c
           }
-          if (clean.includes('integration'))                                             tmpMap.integration = c
+          if (clean.includes('integration')) tmpMap.integration = c
         }
 
         if (hits >= 2 || (r === 1 && Object.keys(tmpMap).length >= 1)) {
@@ -220,22 +219,22 @@ export default class LessonPlanController {
 
         const getCol = (key: string) => colMap[key] ? getCellValue(row.getCell(colMap[key])) : ''
 
-        const code       = getCol('code')
-        const topicName  = getCol('topicName')
-        const content    = getCol('content')
-        let competency   = getCol('competency') || content
-        const outcome    = getCol('outcome')
-        const hoursRaw   = getCol('hours')
-        const hours      = parseFloat(hoursRaw) || 0
-        const lpNumber   = getCol('lpNumber')
-        const miller     = getCol('miller')
-        const bloom      = getCol('bloom')
-        const priority   = getCol('priority')
-        const tlMm       = getCol('tlMm')
-        const assess1    = getCol('assessment')
-        const assess2    = colMap['assessment2'] ? getCellValue(row.getCell(colMap['assessment2'])) : ''
+        const code = getCol('code')
+        const topicName = getCol('topicName')
+        const content = getCol('content')
+        let competency = getCol('competency') || content
+        const outcome = getCol('outcome')
+        const hoursRaw = getCol('hours')
+        const hours = parseFloat(hoursRaw) || 0
+        const lpNumber = getCol('lpNumber')
+        const miller = getCol('miller')
+        const bloom = getCol('bloom')
+        const priority = getCol('priority')
+        const tlMm = getCol('tlMm')
+        const assess1 = getCol('assessment')
+        const assess2 = colMap['assessment2'] ? getCellValue(row.getCell(colMap['assessment2'])) : ''
         // Merge two assessment columns if both exist (e.g. Formative + Summative)
-        let assessment   = ''
+        let assessment = ''
         if (assess1 && assess2) {
           assessment = `${assess1} | ${assess2}`
         } else {
@@ -327,7 +326,7 @@ export default class LessonPlanController {
           }, { client: trx })
         }
 
-        const subtopicName = item.competency || item.content || item.outcome || item.topicName || item.code || `Row ${item.rowNum}`
+        const subtopicName = item.content || item.competency || item.outcome || item.topicName || item.code || `Row ${item.rowNum}`
         subtopicsToCreate.push({
           name: subtopicName,
           code: item.code || null,
@@ -707,10 +706,10 @@ export default class LessonPlanController {
 
     const subtopics = topicIds.length > 0
       ? await LessonPlanSubtopic.query()
-          .whereIn('topic_id', topicIds)
-          .where('lesson_plan_number', lpNumber)
-          .preload('topic')
-          .orderBy('order', 'asc')
+        .whereIn('topic_id', topicIds)
+        .where('lesson_plan_number', lpNumber)
+        .preload('topic')
+        .orderBy('order', 'asc')
       : []
 
     // ── C. Department name (from subject's department) ────────────────────
@@ -829,31 +828,31 @@ export default class LessonPlanController {
 
     if (is1stYear) {
       gridHeader = [
-        { text: 'SI No',                 style: 'tableHeader', alignment: 'center' },
+        { text: 'SI No', style: 'tableHeader', alignment: 'center' },
         { text: 'Domain of\nCompetency', style: 'tableHeader', alignment: 'center' },
-        { text: 'Subject Area',          style: 'tableHeader', alignment: 'center' },
-        { text: 'Miller',                style: 'tableHeader', alignment: 'center' },
-        { text: 'Content',               style: 'tableHeader', alignment: 'center' },
-        { text: 'SLO',                   style: 'tableHeader', alignment: 'center' },
-        { text: 'Bloom/\nGuilbert',      style: 'tableHeader', alignment: 'center' },
-        { text: 'Priority',              style: 'tableHeader', alignment: 'center' },
-        { text: 'TL MM',                 style: 'tableHeader', alignment: 'center' },
-        { text: 'Assessment',            style: 'tableHeader', alignment: 'center' },
-        { text: 'Integration',           style: 'tableHeader', alignment: 'center' }
+        { text: 'Subject Area', style: 'tableHeader', alignment: 'center' },
+        { text: 'Miller', style: 'tableHeader', alignment: 'center' },
+        { text: 'Content', style: 'tableHeader', alignment: 'center' },
+        { text: 'SLO', style: 'tableHeader', alignment: 'center' },
+        { text: 'Bloom/\nGuilbert', style: 'tableHeader', alignment: 'center' },
+        { text: 'Priority', style: 'tableHeader', alignment: 'center' },
+        { text: 'TL MM', style: 'tableHeader', alignment: 'center' },
+        { text: 'Assessment', style: 'tableHeader', alignment: 'center' },
+        { text: 'Integration', style: 'tableHeader', alignment: 'center' }
       ]
       gridWidths = ['5%', '12%', '10%', '6%', '10%', '21%', '7%', '6%', '9%', '8%', '6%']
     } else {
       gridHeader = [
-        { text: 'SI No',                 style: 'tableHeader', alignment: 'center' },
+        { text: 'SI No', style: 'tableHeader', alignment: 'center' },
         { text: 'Domain of\nCompetency', style: 'tableHeader', alignment: 'center' },
-        { text: 'Miller',                style: 'tableHeader', alignment: 'center' },
-        { text: 'Content',               style: 'tableHeader', alignment: 'center' },
-        { text: 'SLO',                   style: 'tableHeader', alignment: 'center' },
-        { text: 'Bloom/\nGuilbert',      style: 'tableHeader', alignment: 'center' },
-        { text: 'Priority',              style: 'tableHeader', alignment: 'center' },
-        { text: 'TL MM',                 style: 'tableHeader', alignment: 'center' },
-        { text: 'Assessment',            style: 'tableHeader', alignment: 'center' },
-        { text: 'Integration',           style: 'tableHeader', alignment: 'center' }
+        { text: 'Miller', style: 'tableHeader', alignment: 'center' },
+        { text: 'Content', style: 'tableHeader', alignment: 'center' },
+        { text: 'SLO', style: 'tableHeader', alignment: 'center' },
+        { text: 'Bloom/\nGuilbert', style: 'tableHeader', alignment: 'center' },
+        { text: 'Priority', style: 'tableHeader', alignment: 'center' },
+        { text: 'TL MM', style: 'tableHeader', alignment: 'center' },
+        { text: 'Assessment', style: 'tableHeader', alignment: 'center' },
+        { text: 'Integration', style: 'tableHeader', alignment: 'center' }
       ]
       gridWidths = ['6%', '12%', '6%', '11%', '25%', '7%', '6%', '10%', '9%', '8%']
     }
@@ -862,22 +861,22 @@ export default class LessonPlanController {
     subtopics.forEach((st, idx) => {
       const rowData: any[] = [
         { text: st.code || String(idx + 1), alignment: 'center', fontSize: 7 },
-        { text: st.competency || '',                            fontSize: 7 }
+        { text: st.competency || '', fontSize: 7 }
       ]
 
       if (is1stYear) {
-        rowData.push({ text: st.topic?.name || '',              fontSize: 7 })
+        rowData.push({ text: st.topic?.name || '', fontSize: 7 })
       }
 
       rowData.push(
-        { text: st.miller     || '',        alignment: 'center', fontSize: 7 },
-        { text: st.name       || '',                             fontSize: 7 },
-        { text: st.detail     || st.outcome || '',               fontSize: 7 },
-        { text: st.bloom      || '',        alignment: 'center', fontSize: 7 },
-        { text: st.priority   || '',        alignment: 'center', fontSize: 7 },
-        { text: st.tlMm       || '',        alignment: 'center', fontSize: 7 },
-        { text: st.assessment || '',        alignment: 'center', fontSize: 7 },
-        { text: st.integration|| '',        alignment: 'center', fontSize: 7 }
+        { text: st.miller || '', alignment: 'center', fontSize: 7 },
+        { text: st.name || '', fontSize: 7 },
+        { text: st.detail || st.outcome || '', fontSize: 7 },
+        { text: st.bloom || '', alignment: 'center', fontSize: 7 },
+        { text: st.priority || '', alignment: 'center', fontSize: 7 },
+        { text: st.tlMm || '', alignment: 'center', fontSize: 7 },
+        { text: st.assessment || '', alignment: 'center', fontSize: 7 },
+        { text: st.integration || '', alignment: 'center', fontSize: 7 }
       )
 
       gridBody.push(rowData)
@@ -1049,12 +1048,12 @@ export default class LessonPlanController {
         { text: 'HOD:-', bold: true, color: '#b91c1c', alignment: 'right', margin: [0, 4, 20, 8], fontSize: 8 }
       ],
       styles: {
-        collegeTitle:    { fontSize: 13, bold: true, color: '#1e293b' },
-        collegeAmpersand:{ fontSize: 11, bold: true, color: '#1e293b' },
+        collegeTitle: { fontSize: 13, bold: true, color: '#1e293b' },
+        collegeAmpersand: { fontSize: 11, bold: true, color: '#1e293b' },
         departmentTitle: { fontSize: 10, bold: true, color: '#1e293b', margin: [0, 3, 0, 0] },
-        detailsSubject:  { fontSize: 11, bold: true, color: '#1e293b' },
-        detailsLecture:  { fontSize: 9,  bold: true, color: '#1e293b', margin: [0, 1, 0, 1] },
-        tableHeader:     { bold: true, fontSize: 8, color: '#0f172a', fillColor: '#f1f5f9' }
+        detailsSubject: { fontSize: 11, bold: true, color: '#1e293b' },
+        detailsLecture: { fontSize: 9, bold: true, color: '#1e293b', margin: [0, 1, 0, 1] },
+        tableHeader: { bold: true, fontSize: 8, color: '#0f172a', fillColor: '#f1f5f9' }
       },
       defaultStyle: { font: 'Roboto', fontSize: 8 }
     }

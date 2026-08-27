@@ -21,6 +21,7 @@ import InquiriesController from '#controllers/InquiriesController'
 import FeesController from '#controllers/FeesController'
 import OrganizationController from '#controllers/OrganizationController'
 import StaffController from '#controllers/StaffController'
+import StaffExperiencesController from '#controllers/staff_experiences_controller'
 import ClassSeatAvailabilitiesController from '#controllers/ClassSeatAvailabilitiesController'
 import QuotasController from '#controllers/QuotaController'
 import QuotaAllocationsController from '#controllers/QuotaAllocationController'
@@ -37,12 +38,17 @@ import DepartmentController from '#controllers/departments_controller'
 import BatchesController from '#controllers/BatchesController'
 import LessonPlanController from '#controllers/lesson_plans_controller'
 import DailyDiaryController from '#controllers/daily_diaries_controller'
+import DiaryLogPermissionsController from '#controllers/diary_log_permissions_controller'
 import ChatController from '#controllers/ChatController'
 import StaffConfigurationsController from '#controllers/StaffConfigurationsController'
 import DeadStocksController from '#controllers/dead_stocks_controller'
 import DeadStockTransactionsController from '#controllers/dead_stock_transactions_controller'
 import InventoryDepartmentsController from '#controllers/inventory_departments_controller'
 import PayrollSettingsController from '#controllers/payroll_settings_controller'
+
+router.get('/', async () => {
+  return { status: 'ok', message: 'Server is running' }
+})
 
 router
   .group(() => {
@@ -154,6 +160,7 @@ router
     router.delete('staff/:staff_id', [StaffController, 'destroyStaff'])
     router.post('staff/bulk-upload', [StaffController, 'bulkUploadStaff'])
     router.post('staff/export/:school_id/:academic_session_id/', [StaffController, 'exportToExcel'])
+    router.post('staff/experience/upload', [StaffExperiencesController, 'bulkUpload'])
     
     // Staff Configurations
     router.get('staff-configurations', [StaffConfigurationsController, 'index'])
@@ -418,6 +425,11 @@ router
     // Daily Diaries
     router.get('daily-diaries', [DailyDiaryController, 'getLogsByDateRange'])
     router.post('daily-diaries', [DailyDiaryController, 'store'])
+
+    // Diary Log Permissions
+    router.get('diary-log-permissions', [DiaryLogPermissionsController, 'index'])
+    router.post('diary-log-permissions', [DiaryLogPermissionsController, 'store'])
+    router.delete('diary-log-permissions/:id', [DiaryLogPermissionsController, 'destroy'])
 
 
     router.post('staff-attendance/check-in', [StaffAttendanceController, 'checkIn'])

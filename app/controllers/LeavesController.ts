@@ -536,8 +536,6 @@ export default class LeavesController {
           }
 
           // Create initial leave balance
-          const currentYear = new Date().getFullYear()
-
           await StaffLeaveBalance.create({
             staff_id: targetStaffId,
             leave_type_id: payload.leave_type_id,
