@@ -4,16 +4,17 @@ import HostelBed from '#models/hostel_bed'
 import db from '@adonisjs/lucid/services/db'
 
 export default class HostelRoomsController {
-  public async store({ request, response }: HttpContext) {
+  public async store({ params, request, response }: HttpContext) {
     const trx = await db.transaction()
     try {
       const payload = request.only(['hostel_id', 'room_number', 'floor', 'capacity', 'status'])
-      if (!payload.hostel_id) {
+      const hostelId = params.hostel_id || payload.hostel_id || request.input('hostel_id')
+      if (!hostelId) {
          return response.badRequest({ message: 'hostel_id is required' })
       }
 
       const room = await HostelRoom.create({
-        hostelId: payload.hostel_id,
+        hostelId: Number(hostelId),
         roomNumber: payload.room_number,
         floor: payload.floor,
         capacity: payload.capacity || 0,

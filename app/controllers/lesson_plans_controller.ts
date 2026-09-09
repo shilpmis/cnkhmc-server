@@ -417,13 +417,15 @@ export default class LessonPlanController {
   public async assignTopicToTeacher({ request, response }: HttpContext) {
     try {
       const topicId = request.param('id')
-      const { staff_ids } = request.body()
+      const body = request.body()
+      const staff_ids = request.input('staff_ids') ?? request.input('staffIds') ?? body?.staff_ids ?? body?.staffIds
       const topic = await LessonPlanTopic.findOrFail(topicId)
-      topic.assignedStaffIds = Array.isArray(staff_ids) ? staff_ids.map(Number) : null
+      topic.assignedStaffIds = Array.isArray(staff_ids) && staff_ids.length > 0 ? staff_ids.map(Number) : null
       await topic.save()
 
       return response.ok(topic)
     } catch (error: any) {
+      console.error('Failed to assign topic to teacher:', error)
       return response.badRequest({ message: 'Failed to assign topic to teacher', error: error.message })
     }
   }
@@ -432,13 +434,15 @@ export default class LessonPlanController {
   public async assignSubtopicToTeacher({ request, response }: HttpContext) {
     try {
       const subtopicId = request.param('id')
-      const { staff_ids } = request.body()
+      const body = request.body()
+      const staff_ids = request.input('staff_ids') ?? request.input('staffIds') ?? body?.staff_ids ?? body?.staffIds
       const subtopic = await LessonPlanSubtopic.findOrFail(subtopicId)
-      subtopic.assignedStaffIds = Array.isArray(staff_ids) ? staff_ids.map(Number) : null
+      subtopic.assignedStaffIds = Array.isArray(staff_ids) && staff_ids.length > 0 ? staff_ids.map(Number) : null
       await subtopic.save()
 
       return response.ok(subtopic)
     } catch (error: any) {
+      console.error('Failed to assign subtopic to teacher:', error)
       return response.badRequest({ message: 'Failed to assign subtopic to teacher', error: error.message })
     }
   }
@@ -687,17 +691,38 @@ export default class LessonPlanController {
     }
 
     // ── A. Load lesson plan ────────────────────────────────────────────────
+    const targetSubject = await Subjects.find(subjectId)
+    let matchingIds: number[] = [Number(subjectId)]
+    if (targetSubject) {
+      const cleanName = targetSubject.name.trim().toLowerCase()
+      const matchingSubjects = await Subjects.query()
+        .whereRaw('LOWER(name) = ?', [cleanName])
+      matchingIds = matchingSubjects.map(s => s.id)
+    }
+
     let lp: any
     try {
-      lp = await LessonPlan.query()
-        .where('subject_id', subjectId)
-        .where('academic_year', academicYear)
+      let query = LessonPlan.query()
+        .whereIn('subject_id', matchingIds)
         .where('school_id', schoolId)
-        .preload('subject')
-        .preload('school')
-        .firstOrFail()
+
+      if (academicYear) {
+        lp = await query.clone()
+          .where('academic_year', academicYear)
+          .preload('subject')
+          .preload('school')
+          .first()
+      }
+
+      if (!lp) {
+        lp = await query.clone()
+          .preload('subject')
+          .preload('school')
+          .orderBy('id', 'desc')
+          .firstOrFail()
+      }
     } catch {
-      return response.notFound({ message: `No lesson plan found for subject ${subjectId} in academic year ${academicYear}` })
+      return response.notFound({ message: `No lesson plan found for subject ${subjectId}` })
     }
 
     // ── B. Load subtopics for this LP number ──────────────────────────────
@@ -715,16 +740,24 @@ export default class LessonPlanController {
     // ── C. Department name (from subject's department) ────────────────────
     // Department lookup removed (department heading not used in PDF output)
     // Use subject name for the "Department of …" heading — matches user's requirement
-    const subjectName = lp.subject?.name || 'Subject'
+    const subjectName = lp.subject?.name || targetSubject?.name || 'Subject'
     // const departmentHeading = department?.name ? `Department of ${department.name}` : `Department of ${subjectName}`
 
     // ── D. Batch name resolution ──────────────────────────────────────────
     // subjects_division_masters → divisions → classes → batches
     let batchName = ''
-    const divMaster = await db.from('subjects_division_masters')
-      .where('subject_id', subjectId)
-      .where('academic_year', academicYear)
-      .first()
+    let divMaster: any = null
+    if (academicYear) {
+      divMaster = await db.from('subjects_division_masters')
+        .whereIn('subject_id', matchingIds)
+        .where('academic_year', academicYear)
+        .first()
+    }
+    if (!divMaster) {
+      divMaster = await db.from('subjects_division_masters')
+        .whereIn('subject_id', matchingIds)
+        .first()
+    }
 
     if (divMaster) {
       const division = await db.from('divisions').where('id', divMaster.division_id).first()
@@ -783,12 +816,20 @@ export default class LessonPlanController {
       const classId = divisionRow?.class_id
 
       if (classId) {
-        const attendanceData = await db.from('attendance_masters as am')
+        let attQuery = db.from('attendance_masters as am')
           .join('attendance_details as ad', 'ad.attendance_master_id', 'am.id')
           .where('am.class_id', classId)
-          .where('am.academic_year', academicYear)
           .whereIn('am.attendance_date', uniqueSortedDates)
           .whereIn('ad.attendance_status', ['present', 'late', 'half_day'])
+
+        if (academicYear) {
+          const checkAtt = await attQuery.clone().where('am.academic_year', academicYear).first()
+          if (checkAtt) {
+            attQuery = attQuery.where('am.academic_year', academicYear)
+          }
+        }
+
+        const attendanceData = await attQuery
           .groupBy('am.attendance_date')
           .select(db.raw('COUNT(ad.id) as present_count'))
 

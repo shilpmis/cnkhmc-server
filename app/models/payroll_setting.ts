@@ -28,7 +28,18 @@ export default class PayrollSetting extends BaseModel {
   @column()
   declare esiEmployerPercentage: number
 
-  @column()
+  @column({
+    prepare: (value: any) => (value ? JSON.stringify(value) : null),
+    consume: (value: any) => {
+      if (!value) return null
+      if (typeof value === 'object') return value
+      try {
+        return JSON.parse(value)
+      } catch {
+        return null
+      }
+    },
+  })
   declare taxSlabs: any
 
   @belongsTo(() => Schools, {

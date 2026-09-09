@@ -199,6 +199,14 @@ function parseSafeBloodGroup(val: any): string | null {
   return null
 }
 
+function parseSafeGender(val: any): any {
+  if (val === null || val === undefined || val === '') return null
+  const str = String(val).trim().toLowerCase()
+  if (['male', 'm'].includes(str)) return 'Male'
+  if (['female', 'f'].includes(str)) return 'Female'
+  return null
+}
+
 function parseSafeCategory(val: any): any {
   if (val === null || val === undefined || val === '') return null
   let str = String(val).trim().toUpperCase()
@@ -209,6 +217,26 @@ function parseSafeCategory(val: any): any {
   if (['SC', 'S.C.', 'SCHEDULED CASTE'].includes(str)) return 'SC'
   if (['OBC', 'O.B.C.', 'SEBC', 'S.E.B.C.', 'BAXI PANCH', 'OTHER BACKWARD CLASS'].includes(str)) return 'OBC'
   
+  return null
+}
+
+function parseAdmissionYear(yearStr: string | null | undefined): number | null {
+  if (!yearStr) return null
+  const trimmed = yearStr.trim()
+  if (trimmed === '') return null
+
+  // E.g. "2025-2026" or "2025-26" or "2025/2026" or "2025/26"
+  const matchRange = trimmed.match(/^(\d{4})[-/]\d{2,4}$/)
+  if (matchRange) {
+    return parseInt(matchRange[1], 10)
+  }
+
+  // E.g. "2025"
+  const matchSingle = trimmed.match(/^(\d{4})$/)
+  if (matchSingle) {
+    return parseInt(matchSingle[1], 10)
+  }
+
   return null
 }
 
@@ -408,12 +436,19 @@ export default class StundetsController {
         { client: trx }
       )
 
+      // Resolve enrollment academic year from admission_year if valid
+      let enrollment_academic_year = Number(academic_year)
+      const parsedYear = parseAdmissionYear(payload.student_meta_data?.admission_year)
+      if (parsedYear !== null) {
+        enrollment_academic_year = parsedYear
+      }
+
       // Add a row in the student_enrollments table within the transaction
       await StudentEnrollments.create(
         {
           student_id: student_data.id,
           division_id: class_id,
-          academic_year: Number(academic_year),
+          academic_year: enrollment_academic_year,
           is_new_admission: true,
           status: 'pursuing',
           remarks: remarks || '',
@@ -546,6 +581,15 @@ export default class StundetsController {
         if (student_meta) {
           student_meta.useTransaction(trx)
           student_meta = await student_meta.merge(payload.student_meta_data).save()
+
+          if (payload.student_meta_data.admission_year !== undefined) {
+            const parsedYear = parseAdmissionYear(payload.student_meta_data.admission_year)
+            if (parsedYear !== null) {
+              StudentEnrollment.useTransaction(trx)
+              StudentEnrollment.academic_year = parsedYear
+              await StudentEnrollment.save()
+            }
+          }
         }
       }
 
@@ -637,7 +681,7 @@ export default class StundetsController {
             first_name: data['FIRST_NAME'],
             middle_name: data['MIDDLE_NAME'] || null,
             last_name: data['LAST_NAME'],
-            gender: data['GENDER'] === '' ? null : data['GENDER'] || null,
+            gender: parseSafeGender(data['GENDER'] || data['Gender'] || data['gender']),
             gr_no: parseSafeInt(data['GR No.'] || data['GR No']),
             primary_mobile: parseSafeInt(data['MOBILE_NO1']) || 9999999999,
             school_id: school_id as number,
@@ -798,7 +842,7 @@ export default class StundetsController {
             first_name: data['First Name'],
             middle_name: data['Middle Name'] || null,
             last_name: data['Last Name'],
-            gender: data['Gender'] === '' ? null : data['Gender'] || null,
+            gender: parseSafeGender(data['Gender'] || data['GENDER'] || data['gender']),
             gr_no: parseSafeInt(data['GR No']),
             primary_mobile: parseSafeInt(data['Mobile No']) || 9999999999,
             school_id: school_id as number,
@@ -874,11 +918,17 @@ export default class StundetsController {
           { client: trx }
         )
 
+        let enrollment_academic_year = Number(academic_year)
+        const parsedYear = parseAdmissionYear(validated_student.student_meta_data?.admission_year)
+        if (parsedYear !== null) {
+          enrollment_academic_year = parsedYear
+        }
+
         await StudentEnrollments.create(
           {
             student_id: student_data.id,
             division_id: division_id,
-            academic_year: academic_year as number,
+            academic_year: enrollment_academic_year,
             status: 'pursuing',
             is_new_admission: false,
           },
@@ -1019,5 +1069,27 @@ export default class StundetsController {
     )
 
     return ctx.response.send(buffer)
+  }
+
+  public async bulkAssignPracticalBatch(ctx: HttpContext) {
+    const payload = ctx.request.body()
+    const { student_ids, practical_batch } = payload
+
+    if (!Array.isArray(student_ids) || student_ids.length === 0) {
+      return ctx.response.status(400).json({ message: 'student_ids must be a non-empty array.' })
+    }
+
+    const trx = await db.transaction()
+    try {
+      await Students.query({ client: trx })
+        .whereIn('id', student_ids)
+        .update({ practical_batch: practical_batch || null })
+
+      await trx.commit()
+      return ctx.response.json({ message: 'Students assigned to batch successfully!' })
+    } catch (e) {
+      await trx.rollback()
+      return ctx.response.status(500).json({ message: 'Failed to assign students to batch.', error: e.message })
+    }
   }
 }

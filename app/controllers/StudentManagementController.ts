@@ -33,7 +33,18 @@ export default class StudentManagementController {
       .where('division_id', division)
       .andWhere('academic_year', academic_year)
       .preload('student', (query) => {
-        query.select(['id', 'enrollment_code', 'first_name', 'middle_name', 'last_name', 'gr_no'])
+        query.select([
+          'id',
+          'enrollment_code',
+          'first_name',
+          'middle_name',
+          'last_name',
+          'gr_no',
+          'first_year_roll_number',
+          'second_year_roll_number',
+          'third_year_roll_number',
+          'fourth_year_roll_number',
+        ])
       })
       .paginate(ctx.request.input('page', 1), 10)
 
@@ -820,6 +831,124 @@ export default class StudentManagementController {
       return response.internalServerError({
         success: false,
         message: 'Bulk hold back failed. Please try again.',
+      })
+    }
+  }
+
+  private getRollColumn(className: string): 'first_year_roll_number' | 'second_year_roll_number' | 'third_year_roll_number' | 'fourth_year_roll_number' {
+    const name = className.toLowerCase()
+    if (name.includes('2nd') || name.includes('second') || name.includes('2')) return 'second_year_roll_number'
+    if (name.includes('3rd') || name.includes('third') || name.includes('3')) return 'third_year_roll_number'
+    if (name.includes('4th') || name.includes('fourth') || name.includes('4')) return 'fourth_year_roll_number'
+    return 'first_year_roll_number'
+  }
+
+  public async autoAssignRollNumbers(ctx: HttpContext) {
+    const division_id = ctx.params.division_id
+    if (!division_id) {
+      return ctx.response.status(400).json({ success: false, message: 'Division ID is required' })
+    }
+
+    const division = await Division.query().where('id', division_id).preload('class').first()
+    if (!division) {
+      return ctx.response.status(404).json({ success: false, message: 'Division not found' })
+    }
+
+    const rollColumn = division.class ? this.getRollColumn(division.class.class) : 'first_year_roll_number'
+
+    const enrollments = await StudentEnrollments.query()
+      .where('division_id', division_id)
+      .whereIn('status', ['pursuing', 'onboarded'])
+      .preload('student')
+
+    if (enrollments.length === 0) {
+      return ctx.response.status(200).json({ success: true, message: 'No students found to assign roll numbers', updated_count: 0 })
+    }
+
+    // Sort students alphabetically by first_name, then last_name
+    enrollments.sort((a, b) => {
+      const nameA = `${a.student?.first_name || ''} ${a.student?.last_name || ''}`.trim().toLowerCase()
+      const nameB = `${b.student?.first_name || ''} ${b.student?.last_name || ''}`.trim().toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
+
+    const startNumber = Number(ctx.request.input('start_number', 1)) || 1
+    const trx = await db.transaction()
+
+    try {
+      let count = 0
+      for (let i = 0; i < enrollments.length; i++) {
+        const student = enrollments[i].student
+        if (student) {
+          student[rollColumn] = startNumber + i
+          await student.useTransaction(trx).save()
+          count++
+        }
+      }
+
+      await trx.commit()
+      return ctx.response.status(200).json({
+        success: true,
+        message: `Successfully assigned roll numbers to ${count} students.`,
+        updated_count: count,
+      })
+    } catch (error: any) {
+      await trx.rollback()
+      console.error('Failed to auto assign roll numbers:', error)
+      return ctx.response.status(500).json({
+        success: false,
+        message: 'Failed to auto assign roll numbers',
+        error: error?.message || 'Internal server error',
+      })
+    }
+  }
+
+  public async manuallyUpdateRollNumber(ctx: HttpContext) {
+    const student_id = ctx.params.student_id
+    const { roll_number, division_id } = ctx.request.all()
+
+    if (!student_id) {
+      return ctx.response.status(400).json({ success: false, message: 'Student ID is required' })
+    }
+
+    const student = await Students.find(student_id)
+    if (!student) {
+      return ctx.response.status(404).json({ success: false, message: 'Student not found' })
+    }
+
+    let rollColumn: 'first_year_roll_number' | 'second_year_roll_number' | 'third_year_roll_number' | 'fourth_year_roll_number' = 'first_year_roll_number'
+
+    let targetDivisionId = division_id
+    if (!targetDivisionId) {
+      const latestEnrollment = await StudentEnrollments.query()
+        .where('student_id', student_id)
+        .orderBy('created_at', 'desc')
+        .first()
+      targetDivisionId = latestEnrollment?.division_id
+    }
+
+    if (targetDivisionId) {
+      const division = await Division.query().where('id', targetDivisionId).preload('class').first()
+      if (division?.class) {
+        rollColumn = this.getRollColumn(division.class.class)
+      }
+    }
+
+    try {
+      student[rollColumn] = roll_number ? Number(roll_number) : null
+      await student.save()
+
+      return ctx.response.status(200).json({
+        success: true,
+        message: 'Roll number updated successfully',
+        student,
+      })
+    } catch (error: any) {
+      console.error('Failed to update roll number:', error)
+      return ctx.response.status(500).json({
+        success: false,
+        message: 'Failed to update roll number',
+        error: error?.message || 'Internal server error',
       })
     }
   }

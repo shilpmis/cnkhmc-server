@@ -60,7 +60,22 @@ export default class LessonPlanSubtopic extends Base {
   @column({ columnName: 'reference_book' })
   declare referenceBook: string | null
 
-  @column({ columnName: 'assigned_staff_ids' })
+  @column({
+    columnName: 'assigned_staff_ids',
+    prepare: (value: any) => (value && Array.isArray(value) ? JSON.stringify(value) : (typeof value === 'string' ? value : null)),
+    consume: (value: any) => {
+      if (!value) return null
+      if (Array.isArray(value)) return value
+      if (typeof value === 'string') {
+        try {
+          return JSON.parse(value)
+        } catch {
+          return null
+        }
+      }
+      return null
+    },
+  })
   declare assignedStaffIds: number[] | null
 
   @belongsTo(() => LessonPlanTopic, {

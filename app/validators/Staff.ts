@@ -76,6 +76,8 @@ export const CreateValidatorForStaff = vine.compile(
     registration_authority: vine.string().trim().maxLength(255).nullable().optional(),
     registration_number: vine.string().trim().maxLength(100).nullable().optional(),
     registration_date: vine.date().nullable().optional(),
+    nch_registration_no: vine.string().trim().maxLength(100).nullable().optional(),
+    nch_registration_date: vine.date().nullable().optional(),
     council_name: vine.string().trim().maxLength(255).nullable().optional(),
     ayush_teacher_code: vine.string().trim().maxLength(100).nullable().optional(),
     md_subject: vine.string().trim().maxLength(100).nullable().optional(),
@@ -134,7 +136,10 @@ export const CreateValidatorForMultipleStaff = vine.compile(
 
       joining_date: vine.date(),
 
-      employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period'])
+      employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']),
+      
+      nch_registration_no: vine.string().trim().maxLength(100).nullable().optional(),
+      nch_registration_date: vine.date().nullable().optional(),
 
     })
   ).minLength(1)
@@ -216,6 +221,8 @@ export const UpdateValidatorForStaff = vine.compile(
     registration_authority: vine.string().trim().maxLength(255).nullable().optional(),
     registration_number: vine.string().trim().maxLength(100).nullable().optional(),
     registration_date: vine.date().nullable().optional(),
+    nch_registration_no: vine.string().trim().maxLength(100).nullable().optional(),
+    nch_registration_date: vine.date().nullable().optional(),
     council_name: vine.string().trim().maxLength(255).nullable().optional(),
     ayush_teacher_code: vine.string().trim().maxLength(100).nullable().optional(),
     md_subject: vine.string().trim().maxLength(100).nullable().optional(),
@@ -258,62 +265,116 @@ export const UpdateValidatorForStaff = vine.compile(
 
 export const CreateValidatorForBulkUpload = vine.compile(
   vine.object({
-    remarks: vine.string().trim().minLength(2).maxLength(255).optional(),
+    remarks: vine.string().trim().maxLength(255).nullable().optional(),
     staff_role_id: vine.number(),
 
-    first_name: vine.string().trim().minLength(1).maxLength(50),
-    middle_name: vine.string().trim().minLength(1).maxLength(50).nullable().optional(),
-    last_name: vine.string().trim().minLength(1).maxLength(50),
+    first_name: vine.string().trim().maxLength(50).nullable().optional(),
+    middle_name: vine.string().trim().maxLength(50).nullable().optional(),
+    last_name: vine.string().trim().maxLength(50).nullable().optional(),
 
-    first_name_in_guj: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    middle_name_in_guj: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    last_name_in_guj: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
+    first_name_in_guj: vine.string().trim().maxLength(50).nullable().optional(),
+    middle_name_in_guj: vine.string().trim().maxLength(50).nullable().optional(),
+    last_name_in_guj: vine.string().trim().maxLength(50).nullable().optional(),
 
-    gender: vine.enum(['Male', 'Female']),
-    marital_status: vine.enum(['Single', 'Married', 'Divorced', 'Widowed']).nullable().optional(),
+    gender: vine.enum(['Male', 'Female']).nullable().optional(),
+    marital_status: vine.string().trim().maxLength(50).nullable().optional(),
 
     birth_date: vine.date().nullable().optional(),
 
-    mobile_number: vine.number(),
+    mobile_number: vine.number().nullable().optional(),
     email: vine.string().email().nullable().optional(),
 
-    emergency_contact_name: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
+    emergency_contact_name: vine.string().trim().maxLength(50).nullable().optional(),
     emergency_contact_number: vine.number().nullable().optional(),
 
     qualification: vine.string().trim().maxLength(255).nullable().optional(),
-
     subject_specialization: vine.string().trim().maxLength(255).nullable().optional(),
 
     joining_date: vine.date().nullable().optional(),
 
-    employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']),
+    employment_status: vine.string().trim().maxLength(100).nullable().optional(),
     experience_years: vine.number().nullable().optional(),
 
     aadhar_no: vine.number().nullable().optional(),
-    pan_card_no: vine.string().trim().minLength(10).maxLength(10).nullable().optional(),
+    pan_card_no: vine.string().trim().maxLength(50).nullable().optional(),
     epf_no: vine.number().optional().nullable().optional(),
     epf_uan_no: vine.number().optional().nullable().optional(),
 
-    blood_group: vine.enum(['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']).nullable().optional(),
-    religion: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    religion_in_guj: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    caste: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    caste_in_guj: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).nullable().optional(),
-    nationality: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
+    blood_group: vine.string().trim().maxLength(20).nullable().optional(),
+    religion: vine.string().trim().maxLength(50).nullable().optional(),
+    religion_in_guj: vine.string().trim().maxLength(50).nullable().optional(),
+    caste: vine.string().trim().maxLength(50).nullable().optional(),
+    caste_in_guj: vine.string().trim().maxLength(50).nullable().optional(),
+    category: vine.string().trim().maxLength(50).nullable().optional(),
+    nationality: vine.string().trim().maxLength(50).nullable().optional(),
 
-    address: vine.string().trim().minLength(2).maxLength(255).nullable().optional(),
-    district: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    city: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
-    state: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
+    address: vine.string().trim().maxLength(255).nullable().optional(),
+    district: vine.string().trim().maxLength(50).nullable().optional(),
+    city: vine.string().trim().maxLength(50).nullable().optional(),
+    state: vine.string().trim().maxLength(50).nullable().optional(),
     postal_code: vine.number().nullable().optional(),
 
-    bank_name: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
+    bank_name: vine.string().trim().maxLength(50).nullable().optional(),
     account_no: vine.number().nullable().optional(),
-    IFSC_code: vine.string().trim().minLength(11).maxLength(11).nullable().optional(),
+    IFSC_code: vine.string().trim().maxLength(20).nullable().optional(),
 
     profile_photo: vine.string().optional().nullable().optional(),
     resignation_date: vine.date().nullable().optional(),
     retirement_date: vine.date().nullable().optional(),
+
+    appointment_date: vine.date().nullable().optional(),
+    promotion_date: vine.string().trim().maxLength(500).nullable().optional(),
+    registration_date: vine.date().nullable().optional(),
+    date_of_registration: vine.date().nullable().optional(),
+    passing_date: vine.date().nullable().optional(),
+    driving_licence_expiry: vine.date().nullable().optional(),
+    university_approval_date: vine.date().nullable().optional(),
+
+    child_count: vine.number().nullable().optional(),
+    total_experience: vine.number().nullable().optional(),
+    
+    // New fields from STAFF DETAIL.xlsx
+    department_id: vine.number().nullable().optional(),
+    department: vine.string().trim().maxLength(100).nullable().optional(),
+    short_name: vine.string().trim().maxLength(100).nullable().optional(),
+    minority: vine.string().trim().maxLength(50).nullable().optional(),
+    designation: vine.string().trim().maxLength(100).nullable().optional(),
+    staff_type: vine.string().trim().maxLength(50).nullable().optional(),
+    staff_category: vine.string().trim().maxLength(50).nullable().optional(),
+    nature_of_appointment: vine.string().trim().maxLength(100).nullable().optional(),
+    registration_authority: vine.string().trim().maxLength(255).nullable().optional(),
+    registration_number: vine.string().trim().maxLength(100).nullable().optional(),
+    nch_registration_no: vine.string().trim().maxLength(100).nullable().optional(),
+    nch_registration_date: vine.date().nullable().optional(),
+    council_name: vine.string().trim().maxLength(255).nullable().optional(),
+    ayush_teacher_code: vine.string().trim().maxLength(100).nullable().optional(),
+    md_subject: vine.string().trim().maxLength(100).nullable().optional(),
+    qualification_college: vine.string().trim().maxLength(255).nullable().optional(),
+    qualification_university: vine.string().trim().maxLength(255).nullable().optional(),
+    voter_id: vine.string().trim().maxLength(50).nullable().optional(),
+    driving_licence: vine.string().trim().maxLength(50).nullable().optional(),
+    uni_approval_date: vine.date().nullable().optional(),
+    uni_approval_number: vine.string().trim().maxLength(100).nullable().optional(),
+    branch_details: vine.string().trim().maxLength(255).nullable().optional(),
+    ayush_id_no: vine.string().trim().maxLength(100).nullable().optional(),
+    teacher_code: vine.string().trim().maxLength(100).nullable().optional(),
+    ayush_registration_no: vine.string().trim().maxLength(100).nullable().optional(),
+    university_approval_letter_no: vine.string().trim().maxLength(100).nullable().optional(),
+    bank_branch_name: vine.string().trim().maxLength(255).nullable().optional(),
+    state_council_reg_no: vine.string().trim().maxLength(100).nullable().optional(),
+    university_appointment_letter_no: vine.string().trim().maxLength(255).nullable().optional(),
+    university_appointment_date: vine.date().nullable().optional(),
+    area_of_expertise: vine.string().trim().maxLength(255).nullable().optional(),
+    ug_degree: vine.string().trim().maxLength(100).nullable().optional(),
+    ug_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
+    ug_passing_year: vine.number().nullable().optional(),
+    pg_degree: vine.string().trim().maxLength(100).nullable().optional(),
+    pg_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
+    pg_passing_year: vine.number().nullable().optional(),
+    other_degree: vine.string().trim().maxLength(100).nullable().optional(),
+    other_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
+    other_passing_year: vine.number().nullable().optional(),
+    pay_scale: vine.string().trim().maxLength(100).nullable().optional(),
+    retirement_age: vine.number().nullable().optional(),
   })
 )

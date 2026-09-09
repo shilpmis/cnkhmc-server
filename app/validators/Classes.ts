@@ -10,6 +10,7 @@ export const CreateValidatorForClasses = vine.compile(
     batch_id: vine.number().positive().optional(),
     department_id: vine.number().positive().optional(),
     is_active: vine.boolean().optional(),
+    with_division: vine.boolean().optional(),
   })
 )
 
@@ -18,7 +19,8 @@ export const CreateValidatorForDivision = vine.compile(
     class_id: vine.number().positive(),
     division: vine.enum(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']),
     aliases: vine.string().minLength(3).maxLength(20).optional(),
-    academic_year: vine.number().positive(),
+    academic_year: vine.number().positive().optional(),
+    academic_session_id: vine.number().positive().optional(),
     is_active: vine.boolean().optional(),
   })
 )
@@ -32,6 +34,7 @@ export const CreateManyValidatorForClasses = vine.compile(
         batch_id: vine.number().positive().optional(),
         department_id: vine.number().positive().optional(),
         is_active: vine.boolean().optional(),
+        with_division: vine.boolean().optional(),
       })
     )
     .minLength(1)

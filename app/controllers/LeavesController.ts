@@ -4,6 +4,7 @@ import LeaveTypeMaster from '#models/LeaveTypeMaster'
 import Staff from '#models/Staff'
 import StaffLeaveApplication from '#models/StaffLeaveApplication'
 import StaffLeaveBalance from '#models/StaffLeaveBalance'
+import CompOffRequest from '#models/CompOffRequest'
 import {
   CreateValidatorForLeaveApplication,
   CreateValidatorForLeavePolicies,
@@ -15,6 +16,10 @@ import {
   ValidatorForCancelApplication,
   SearchValidatorForStaff,
 } from '#validators/Leave'
+import {
+  CreateCompOffRequestValidator,
+  ProcessCompOffRequestValidator,
+} from '#validators/CompOffValidator'
 import { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
 import { DateTime } from 'luxon'
@@ -1455,4 +1460,336 @@ export default class LeavesController {
     }
     return parseFloat(numValue.toFixed(decimals));
   }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // COMP OFF METHODS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  async submitCompOffRequest(ctx: HttpContext) {
+    try {
+      const user = ctx.auth.user!
+      const staff_id = user.staff_id || ctx.request.input('staff_id')
+      if (!staff_id) {
+        return ctx.response.status(403).json({ message: 'Staff profile is required to submit Comp Off request.' })
+      }
+
+      const payload = await CreateCompOffRequestValidator.validate(ctx.request.body())
+      const workedDate = DateTime.fromISO(payload.worked_date)
+      const today = DateTime.now().endOf('day')
+
+      if (workedDate > today) {
+        return ctx.response.status(400).json({ message: 'Comp Off request is only allowed for past or current dates.' })
+      }
+
+      // Prevent duplicate pending/approved request for same worked_date
+      const existing = await CompOffRequest.query()
+        .where('staff_id', staff_id)
+        .where('worked_date', payload.worked_date)
+        .whereIn('status', ['pending', 'approved'])
+        .first()
+
+      if (existing) {
+        return ctx.response.status(409).json({ message: 'A Comp Off request for this date already exists.' })
+      }
+
+      const creditedDays = payload.day_type === 'half_day' ? 0.5 : 1.0
+
+      const compOff = await CompOffRequest.create({
+        uuid: uuidv4(),
+        staff_id: staff_id,
+        school_id: user.school_id || 1,
+        academic_year: ctx.request.input('academic_year') || undefined,
+        worked_date: payload.worked_date,
+        day_type: payload.day_type,
+        credited_days: creditedDays,
+        reason: payload.reason,
+        description: payload.description ?? null,
+        status: 'pending',
+      })
+
+      return ctx.response.status(201).json({
+        message: 'Comp Off request submitted successfully',
+        data: compOff,
+      })
+    } catch (error) {
+      return ctx.response.status(400).json({ message: error.message || 'Failed to submit Comp Off request' })
+    }
+  }
+
+  async fetchStaffCompOffRequests(ctx: HttpContext) {
+    try {
+      const user = ctx.auth.user!
+      const staff_id = ctx.params.staff_id || user.staff_id
+      if (!staff_id) {
+        return ctx.response.status(400).json({ message: 'Staff ID is required.' })
+      }
+
+      const requests = await CompOffRequest.query()
+        .where('staff_id', staff_id)
+        .preload('approved_by_user')
+        .orderBy('created_at', 'desc')
+
+      return ctx.response.status(200).json({ data: requests })
+    } catch (error) {
+      return ctx.response.status(500).json({ message: 'Failed to fetch Comp Off requests', error: error.message })
+    }
+  }
+
+  async fetchCompOffRequestsForAdmin(ctx: HttpContext) {
+    try {
+      const user = ctx.auth.user!
+      const school_id = user.school_id || 1
+      const statusFilter = ctx.request.input('status')
+
+      let query = CompOffRequest.query()
+        .where('school_id', school_id)
+        .preload('staff')
+        .preload('approved_by_user')
+        .orderBy('created_at', 'desc')
+
+      if (statusFilter && statusFilter !== 'all') {
+        query = query.where('status', statusFilter)
+      }
+
+      const requests = await query
+
+      return ctx.response.status(200).json({ data: requests })
+    } catch (error) {
+      return ctx.response.status(500).json({ message: 'Failed to fetch admin Comp Off requests', error: error.message })
+    }
+  }
+
+  async processCompOffRequest(ctx: HttpContext) {
+    const trx = await db.transaction()
+    try {
+      const { uuid } = ctx.params
+      const compOff = await CompOffRequest.query({ client: trx })
+        .where('uuid', uuid)
+        .preload('staff')
+        .first()
+
+      if (!compOff) {
+        await trx.rollback()
+        return ctx.response.status(404).json({ message: 'Comp Off request not found.' })
+      }
+
+      if (compOff.status !== 'pending') {
+        await trx.rollback()
+        return ctx.response.status(400).json({ message: `Comp Off request has already been ${compOff.status}.` })
+      }
+
+      const payload = await ProcessCompOffRequestValidator.validate(ctx.request.body())
+      const adminUser = ctx.auth.user!
+
+      compOff.status = payload.status
+      compOff.approved_by = adminUser.id
+      compOff.admin_remarks = payload.admin_remarks ?? null
+      await compOff.useTransaction(trx).save()
+
+      if (payload.status === 'approved') {
+        // Find or create 'Comp Off' leave type master
+        let compOffLeaveType = await LeaveTypeMaster.query({ client: trx })
+          .where('school_id', compOff.school_id)
+          .where('leave_type_name', 'Comp Off')
+          .first()
+
+        if (!compOffLeaveType) {
+          compOffLeaveType = await LeaveTypeMaster.create(
+            {
+              school_id: compOff.school_id,
+              leave_type_name: 'Comp Off',
+              academic_year: compOff.academic_year || 1,
+              is_paid: true,
+              affects_payroll: false,
+              requires_proof: false,
+              is_active: true,
+            },
+            { client: trx }
+          )
+        }
+
+        // Credit the staff leave balance for Comp Off
+        let leaveBalance = await StaffLeaveBalance.query({ client: trx })
+          .where('staff_id', compOff.staff_id)
+          .where('leave_type_id', compOffLeaveType.id)
+          .orderBy('id', 'desc')
+          .first()
+
+        const creditedDays = Number(compOff.credited_days)
+
+        if (leaveBalance) {
+          const newTotal = this.formatDecimalValue(Number(leaveBalance.total_leaves) + creditedDays)
+          const newAvailable = this.formatDecimalValue(Number(leaveBalance.available_balance) + creditedDays)
+          await leaveBalance
+            .merge({
+              total_leaves: newTotal,
+              available_balance: newAvailable,
+            })
+            .useTransaction(trx)
+            .save()
+        } else {
+          await StaffLeaveBalance.create(
+            {
+              staff_id: compOff.staff_id,
+              leave_type_id: compOffLeaveType.id,
+              academic_year: compOff.academic_year || 1,
+              total_leaves: creditedDays,
+              used_leaves: 0,
+              pending_leaves: 0,
+              carried_forward: 0,
+              available_balance: creditedDays,
+            },
+            { client: trx }
+          )
+        }
+      }
+
+      await trx.commit()
+
+      return ctx.response.status(200).json({
+        message: `Comp Off request ${payload.status} successfully.`,
+        data: compOff,
+      })
+    } catch (error) {
+      await trx.rollback()
+      return ctx.response.status(500).json({ message: 'Error processing Comp Off request', error: error.message })
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // LEAVE REPORT METHODS
+  // ──────────────────────────────────────────────────────────────────────────
+
+  async fetchTeachersLeaveSummaryReport(ctx: HttpContext) {
+    try {
+      const user = ctx.auth.user!
+      const school_id = user.school_id || 1
+      const academic_year = ctx.request.input('academic_year')
+
+      // Fetch all active leave types for school
+      let leaveTypesQuery = LeaveTypeMaster.query().where('school_id', school_id)
+      if (academic_year) {
+        leaveTypesQuery = leaveTypesQuery.where('academic_year', academic_year)
+      }
+      const leaveTypes = await leaveTypesQuery
+
+      // Fetch all staff for school
+      let staffQuery = Staff.query()
+        .where('school_id', school_id)
+        .preload('department_details')
+        .orderBy('first_name', 'asc')
+
+      const staffList = await staffQuery
+
+      // Fetch all balances
+      let balancesQuery = StaffLeaveBalance.query().preload('leave_type')
+      if (academic_year) {
+        balancesQuery = balancesQuery.where('academic_year', academic_year)
+      }
+      const allBalances = await balancesQuery
+
+      // Group balances by staff_id
+      const balancesByStaff = new Map<number, StaffLeaveBalance[]>()
+      allBalances.forEach((b) => {
+        const list = balancesByStaff.get(b.staff_id) || []
+        list.push(b)
+        balancesByStaff.set(b.staff_id, list)
+      })
+
+      const summary = staffList.map((st) => {
+        const staffBalances = balancesByStaff.get(st.id) || []
+
+        let totalTaken = 0
+        let totalAvailable = 0
+        const leaveBreakdown: Record<string, { used: number; total: number; available: number }> = {}
+
+        leaveTypes.forEach((lt) => {
+          const bal = staffBalances.find((b) => b.leave_type_id === lt.id)
+          const used = bal ? Number(bal.used_leaves) || 0 : 0
+          const total = bal ? Number(bal.total_leaves) || 0 : 0
+          const available = bal ? Number(bal.available_balance) || 0 : 0
+
+          totalTaken += used
+          totalAvailable += available
+
+          leaveBreakdown[lt.leave_type_name] = { used, total, available }
+        })
+
+        return {
+          staff_id: st.id,
+          first_name: st.first_name,
+          middle_name: st.middle_name,
+          last_name: st.last_name,
+          full_name: `${st.first_name} ${st.last_name}`.trim(),
+          employee_id: (st as any).employee_id || (st as any).staff_code || `ST-${st.id}`,
+          department: typeof st.department === 'string' && st.department.trim() ? st.department : st.department_details?.name || 'N/A',
+          total_leaves_taken: totalTaken,
+          total_leaves_available: totalAvailable,
+          leave_breakdown: leaveBreakdown,
+        }
+      })
+
+      return ctx.response.status(200).json({
+        leave_types: leaveTypes.map((lt) => ({ id: lt.id, name: lt.leave_type_name })),
+        data: summary,
+      })
+    } catch (error) {
+      return ctx.response.status(500).json({ message: 'Failed to generate leave summary report', error: error.message })
+    }
+  }
+
+  async fetchIndividualTeacherLeaveReport(ctx: HttpContext) {
+    try {
+      const staff_id = ctx.params.staff_id
+      if (!staff_id) {
+        return ctx.response.status(400).json({ message: 'Staff ID is required.' })
+      }
+
+      const staff = await Staff.query()
+        .where('id', staff_id)
+        .preload('department_details')
+        .first()
+
+      if (!staff) {
+        return ctx.response.status(404).json({ message: 'Staff member not found.' })
+      }
+
+      // Fetch balances
+      const balances = await StaffLeaveBalance.query()
+        .where('staff_id', staff_id)
+        .preload('leave_type')
+
+      // Fetch applications
+      const applications = await StaffLeaveApplication.query()
+        .where('staff_id', staff_id)
+        .preload('leave_type')
+        .preload('approved_by_user')
+        .orderBy('created_at', 'desc')
+
+      // Fetch comp off requests
+      const compOffs = await CompOffRequest.query()
+        .where('staff_id', staff_id)
+        .preload('approved_by_user')
+        .orderBy('created_at', 'desc')
+
+      return ctx.response.status(200).json({
+        staff: {
+          id: staff.id,
+          first_name: staff.first_name,
+          middle_name: staff.middle_name,
+          last_name: staff.last_name,
+          full_name: `${staff.first_name} ${staff.last_name}`.trim(),
+          employee_id: (staff as any).employee_id || (staff as any).staff_code || `ST-${staff.id}`,
+          department: typeof staff.department === 'string' && staff.department.trim() ? staff.department : staff.department_details?.name || 'N/A',
+        },
+        balances,
+        applications,
+        comp_off_requests: compOffs,
+      })
+    } catch (error) {
+      return ctx.response.status(500).json({ message: 'Failed to fetch individual leave report', error: error.message })
+    }
+  }
 }
+
+

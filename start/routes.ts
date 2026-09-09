@@ -45,6 +45,18 @@ import DeadStocksController from '#controllers/dead_stocks_controller'
 import DeadStockTransactionsController from '#controllers/dead_stock_transactions_controller'
 import InventoryDepartmentsController from '#controllers/inventory_departments_controller'
 import PayrollSettingsController from '#controllers/payroll_settings_controller'
+import PracticalBatchSettingsController from '#controllers/PracticalBatchSettingsController'
+import LectureAttendanceController from '#controllers/LectureAttendanceController'
+import AcademicSessionsController from '#controllers/AcademicSessionsController'
+import HostelsController from '#controllers/hostels_controller'
+import HostelRoomsController from '#controllers/hostel_rooms_controller'
+import HostelAllocationsController from '#controllers/hostel_allocations_controller'
+import CertificateTemplatesController from '#controllers/certificate_templates_controller'
+import ExamMastersController from '#controllers/exam_masters_controller'
+import ExamSchedulesController from '#controllers/exam_schedules_controller'
+import ExamSubjectsController from '#controllers/exam_subjects_controller'
+import PoliciesController from '#controllers/policies_controller'
+import AdmissionsController from '#controllers/AdmissionController'
 
 router.get('/', async () => {
   return { status: 'ok', message: 'Server is running' }
@@ -84,17 +96,17 @@ router
     router.get('/school/:school_id', [SchoolsController, 'index'])
     router.put('/school/:school_id', [SchoolsController, 'update'])
 
-    // AcademicSession routes removed - AcademicSessionsController no longer exists
-    // router.post('/academic-session', [AcademicSessionsController, 'createAcademicSessionForSchool'])
-    // router.put('/academic-session/:id', [
-    //   AcademicSessionsController,
-    //   'updateAcademicSessionForSchool',
-    // ])
-    // router.get('/academic-sessions/:school_id', [
-    //   AcademicSessionsController,
-    //   'getAllAcademicSessionInSchool',
-    // ])
-    // router.delete('/academic-session/:id', [AcademicSessionsController, 'deleteAcademicSession'])
+    // AcademicSession routes
+    router.post('/academic-session', [AcademicSessionsController, 'createAcademicSessionForSchool'])
+    router.put('/academic-session/:id', [
+      AcademicSessionsController,
+      'updateAcademicSessionForSchool',
+    ])
+    router.get('/academic-sessions/:school_id', [
+      AcademicSessionsController,
+      'getAllAcademicSessionInSchool',
+    ])
+    router.delete('/academic-session/:id', [AcademicSessionsController, 'deleteAcademicSession'])
 
     router.get('/academic-calendar-settings/:academic_session_id', [
       AcademicCalendarSettingsController,
@@ -116,6 +128,7 @@ router
     router.post('/classes', [ClassesController, 'createMultipleClasses'])
     router.post('/class/division', [ClassesController, 'createDivision'])
     router.put('/class/:division_id', [ClassesController, 'updateClass'])
+    router.delete('/class/division/:id', [ClassesController, 'deleteDivision'])
 
     // Batch Management
     router.get('/batches', [BatchesController, 'index'])
@@ -139,6 +152,7 @@ router
     router.post('student', [StundetsController, 'createSingleStudent'])
     router.post('students/multiple/:class_id', [StundetsController, 'createMultipleStudents'])
     router.put('student/:student_id', [StundetsController, 'updateStudents'])
+    router.post('students/bulk-assign-batch', [StundetsController, 'bulkAssignPracticalBatch'])
     router.post('students/bulk-upload/:academic_year/:division_id', [
       StundetsController,
       'bulkUploadStudents',
@@ -147,6 +161,15 @@ router
       StundetsController,
       'exportToExcel',
     ])
+
+    // Student Management (drop, migrate, suspend, roll numbers)
+    router.get('management/students/:division_id', [StudentManagementController, 'indexStudentForManagement'])
+    router.post('management/students/:division_id/auto-assign-roll-numbers', [StudentManagementController, 'autoAssignRollNumbers'])
+    router.put('management/students/:student_id/roll-number', [StudentManagementController, 'manuallyUpdateRollNumber'])
+    router.post('management/student/migrate/:student_enrollment_id', [StudentManagementController, 'updateEnrollmentStatusToMigrate'])
+    router.post('management/student/drop/:student_enrollment_id', [StudentManagementController, 'updateEnrollmentStatusToDrop'])
+    router.post('management/student/complete/:student_enrollment_id', [StudentManagementController, 'updateEnrollmentStatusToComplete'])
+    router.post('management/student/suspend/:student_enrollment_id', [StudentManagementController, 'updateEnrollmentStatusToSuspended'])
 
     router.get('/staff-role/:school_id', [StaffMasterController, 'indexStaffMasterForSchool'])
     router.post('/staff-role', [StaffMasterController, 'createStaffRole'])
@@ -202,8 +225,20 @@ router
         router.get('leave-logs/:id', [LeavesController, 'getLeaveApplicationLogs'])
         router.post('leave/staff/search', [LeavesController, 'searchStaff'])
         router.post('leave/carry-forward', [LeavesController, 'processLeaveCarryForward'])
+
+        // Comp Off routes
+        router.post('comp-off/request', [LeavesController, 'submitCompOffRequest'])
+        router.get('comp-off/requests/:staff_id', [LeavesController, 'fetchStaffCompOffRequests'])
+        router.get('comp-off/admin/requests', [LeavesController, 'fetchCompOffRequestsForAdmin'])
+        router.put('comp-off/request/status/:uuid', [LeavesController, 'processCompOffRequest'])
+
+        // Leave Report routes
+        router.get('leave-reports/summary', [LeavesController, 'fetchTeachersLeaveSummaryReport'])
+        router.get('leave-reports/individual/:staff_id', [LeavesController, 'fetchIndividualTeacherLeaveReport'])
       })
       .use(middleware.auth())
+
+
 
     // payroll
     router.get('/payroll/salary-component', [PayrollController, 'indexSalaryComponents'])
@@ -220,6 +255,10 @@ router
     // payroll settings
     router.get('/payroll/settings', [PayrollSettingsController, 'getSettings'])
     router.put('/payroll/settings', [PayrollSettingsController, 'updateSettings'])
+
+    // practical batch settings
+    router.get('/practical-batch-settings', [PracticalBatchSettingsController, 'getSettings'])
+    router.put('/practical-batch-settings', [PracticalBatchSettingsController, 'updateSettings'])
 
     router.get('/payroll/salary-template', [PayrollController, 'indexSalaryTemplates'])
     router.get('/payroll/salary-template/:template_id', [
@@ -352,11 +391,6 @@ router
       'getPromotionHistory',
     ])
 
-    router.get('/management/students/:division_id' , [StudentManagementController , 'indexStudentForManagement'])
-    router.post('/management/student/migrate/:student_enrollment_id' , [StudentManagementController , 'updateEnrollmentStatusToMigrate'])
-    router.post('/management/student/complete/:student_enrollment_id' , [StudentManagementController , 'updateEnrollmentStatusToComplete'])
-    router.post('/management/student/suspend/:student_enrollment_id' , [StudentManagementController , 'updateEnrollmentStatusToSuspended'])
-    router.post('/management/student/drop/:student_enrollment_id' , [StudentManagementController , 'updateEnrollmentStatusToDrop'])
 
 
     router.get('subjects', [SubjectController, 'indexSubjects'])
@@ -474,6 +508,72 @@ router
     router.get('inventory-departments/:id', [InventoryDepartmentsController, 'show'])
     router.put('inventory-departments/:id', [InventoryDepartmentsController, 'update'])
     router.delete('inventory-departments/:id', [InventoryDepartmentsController, 'destroy'])
+
+    // ── Lecture / Lab Attendance ─────────────────────────────────────────────
+    // Static-prefix routes MUST come before the parameterised /:division_id route
+    router.get('lecture-attendance/subjects', [LectureAttendanceController, 'getMySubjects'])
+    router.get('lecture-attendance/history/:division_id/:subject_id', [LectureAttendanceController, 'getHistory'])
+    router.get('lecture-attendance/export/history/:division_id/:subject_id', [LectureAttendanceController, 'exportHistory'])
+    router.get('lecture-attendance/report/student/:student_id', [LectureAttendanceController, 'getStudentReport'])
+    router.get('lecture-attendance/report/student/:student_id/subject/:subject_id', [LectureAttendanceController, 'getStudentSubjectReport'])
+    router.get('lecture-attendance/report/class/:division_id', [LectureAttendanceController, 'getClassReport'])
+    router.get('lecture-attendance/report/class/:division_id/subject/:subject_id', [LectureAttendanceController, 'getClassSubjectReport'])
+    router.get('lecture-attendance/export/report/:division_id', [LectureAttendanceController, 'exportReport'])
+    router.get('lecture-attendance/:division_id/:subject_id/:unix_date', [LectureAttendanceController, 'getAttendanceForDate'])
+    router.post('lecture-attendance', [LectureAttendanceController, 'markAttendance'])
+
+    // ── Hostel Management Routes ──────────────────────────────────────────────
+    router.get('hostels', [HostelsController, 'index'])
+    router.post('hostels', [HostelsController, 'store'])
+    router.get('hostels/:id', [HostelsController, 'show'])
+    router.put('hostels/:id', [HostelsController, 'update'])
+    router.delete('hostels/:id', [HostelsController, 'destroy'])
+
+    router.post('hostels/:hostel_id/rooms', [HostelRoomsController, 'store'])
+    router.put('hostels/rooms/:id', [HostelRoomsController, 'update'])
+    router.delete('hostels/rooms/:id', [HostelRoomsController, 'destroy'])
+
+    router.post('hostels/allocations', [HostelAllocationsController, 'allocate'])
+    router.put('hostels/allocations/:id/vacate', [HostelAllocationsController, 'vacate'])
+
+    // Certificate Templates
+    router.get('certificate-templates', [CertificateTemplatesController, 'index'])
+    router.post('certificate-templates', [CertificateTemplatesController, 'store'])
+    router.get('certificate-templates/:id', [CertificateTemplatesController, 'show'])
+    router.put('certificate-templates/:id', [CertificateTemplatesController, 'update'])
+    router.delete('certificate-templates/:id', [CertificateTemplatesController, 'destroy'])
+    router.get('certificate-templates/0/generate/:student_id', [CertificateTemplatesController, 'generate'])
+
+    // Exam Management
+    router.get('exam-masters', [ExamMastersController, 'index'])
+    router.post('exam-masters', [ExamMastersController, 'store'])
+    router.get('exam-masters/:id', [ExamMastersController, 'show'])
+    router.put('exam-masters/:id', [ExamMastersController, 'update'])
+    router.delete('exam-masters/:id', [ExamMastersController, 'destroy'])
+
+    router.get('exam-schedules', [ExamSchedulesController, 'index'])
+    router.post('exam-schedules', [ExamSchedulesController, 'store'])
+    router.get('exam-schedules/:id', [ExamSchedulesController, 'show'])
+    router.put('exam-schedules/:id', [ExamSchedulesController, 'update'])
+    router.delete('exam-schedules/:id', [ExamSchedulesController, 'destroy'])
+
+    router.get('exam-subjects', [ExamSubjectsController, 'index'])
+    router.post('exam-subjects', [ExamSubjectsController, 'store'])
+    router.get('exam-subjects/:id', [ExamSubjectsController, 'show'])
+    router.put('exam-subjects/:id', [ExamSubjectsController, 'update'])
+    router.delete('exam-subjects/:id', [ExamSubjectsController, 'destroy'])
+
+    // Policies
+    router.get('policies', [PoliciesController, 'index'])
+    router.post('policies', [PoliciesController, 'store'])
+    router.get('policies/:id', [PoliciesController, 'show'])
+    router.put('policies/:id', [PoliciesController, 'update'])
+    router.delete('policies/:id', [PoliciesController, 'destroy'])
+    router.post('policies/user/:userId', [PoliciesController, 'assignToUser'])
+
+    // Admissions
+    router.post('admissions/admit', [AdmissionsController, 'admitStudent'])
+    router.get('admissions', [AdmissionsController, 'list'])
   })
   .prefix('/api/v1/')
   .use(middleware.auth())

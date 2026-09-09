@@ -18,6 +18,9 @@ export default class Students extends Base {
   declare batch_id: number | null
 
   @column()
+  declare practical_batch: string | null
+
+  @column()
   declare student_type: 'SCHOOL' | 'COLLEGE'
 
   @column()

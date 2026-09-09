@@ -164,11 +164,8 @@ export default class Staff extends Base {
   declare appointment_date: Date | null
 
   // DB column: date_of_promotion (model uses promotion_date)
-  @column({
-    columnName: 'date_of_promotion',
-    serialize: (value: Date) => Base.serializeDateAsSQLDateString(value),
-  })
-  declare promotion_date: Date | null
+  @column({ columnName: 'date_of_promotion' })
+  declare promotion_date: string | null
 
   // DB column: registration_no (model uses registration_number)
   @column({ columnName: 'registration_no' })
@@ -178,6 +175,14 @@ export default class Staff extends Base {
     serialize: (value: Date) => Base.serializeDateAsSQLDateString(value),
   })
   declare registration_date: Date | null
+
+  @column()
+  declare nch_registration_no: string | null
+
+  @column({
+    serialize: (value: Date) => Base.serializeDateAsSQLDateString(value),
+  })
+  declare nch_registration_date: Date | null
 
   // DB column: name_of_council (model uses council_name)
   @column({ columnName: 'name_of_council' })
@@ -295,7 +300,7 @@ export default class Staff extends Base {
   declare retirement_age: number | null
 
   @column()
-  declare mobile_number: number
+  declare mobile_number: string | number | null
 
   @column()
   declare email: string | null

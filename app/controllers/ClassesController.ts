@@ -151,7 +151,7 @@ export default class ClassesController {
      * TODO : Check for unique alise names of class , for perticular school
      */
     // const academic_session_id = ctx.auth.user?.academic_session_id;
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response
         .status(403)
         .json({ message: 'You are not allocated to manage this functions.' })
@@ -161,19 +161,22 @@ export default class ClassesController {
 
     try {
       const payload = await CreateValidatorForClasses.validate(ctx.request.body())
+      const { with_division, ...classData } = payload
       const created_class = await Classes.create(
-        { ...payload, school_id: ctx.auth.user!.school_id! },
+        { ...classData, school_id: ctx.auth.user!.school_id! },
         { client: trx }
       )
 
-      await Divisions.create(
-        {
-          class_id: created_class.id,
-          division: 'A' as 'A',
-          academic_year: payload.academic_year as number,
-        },
-        { client: trx }
-      )
+      if (with_division) {
+        await Divisions.create(
+          {
+            class_id: created_class.id,
+            division: 'A' as 'A',
+            academic_year: payload.academic_year as number,
+          },
+          { client: trx }
+        )
+      }
       await trx.commit()
       return ctx.response.json(created_class.serialize())
     } catch (error) {
@@ -187,35 +190,40 @@ export default class ClassesController {
    * @param ctx
    * @returns
    *
-   * this method will only create default class , which will create divition 'A' only
+   * this method will create classes, optionally creating default division 'A' if with_division is true
    */
   async createMultipleClasses(ctx: HttpContext) {
     /**
      * TODO : Check for unique alise names of class , for perticular school
      */
 
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response
         .status(403)
         .json({ message: 'You are not allocated to manage this functions.' })
     }
-    let payload = await CreateManyValidatorForClasses.validate(ctx.request.body())
+    let validatedPayload = await CreateManyValidatorForClasses.validate(ctx.request.body())
     let trx = await db.transaction()
-    payload = payload.map((item) => {
-      return { ...item, school_id: ctx.auth.user!.school_id! }
+    const classPayloads = validatedPayload.map((item) => {
+      const { with_division, ...rest } = item
+      return { ...rest, school_id: ctx.auth.user!.school_id! }
     })
     try {
-      const created_class = await Classes.createMany(payload, { client: trx })
-      // cretae default division for each class
-      let divisions = created_class.map((item) => {
-        return {
-          class_id: item.id,
-          division: 'A' as 'A',
-          academic_year: item.academic_year as number,
-          aliases: null,
-        }
-      })
-      await Divisions.createMany(divisions, { client: trx })
+      const created_class = await Classes.createMany(classPayloads, { client: trx })
+      // create default division for each class if requested
+      let divisions = created_class
+        .filter((_, index) => validatedPayload[index].with_division)
+        .map((item) => {
+          return {
+            class_id: item.id,
+            division: 'A' as 'A',
+            academic_year: item.academic_year as number,
+            aliases: null,
+          }
+        })
+      if (divisions.length > 0) {
+        await Divisions.createMany(divisions, { client: trx })
+      }
       await trx.commit()
       return ctx.response.json(created_class)
     } catch (error) {
@@ -226,7 +234,7 @@ export default class ClassesController {
 
   async updateClass(ctx: HttpContext) {
     let school_id = ctx.auth.user!.school_id!
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response
         .status(403)
         .json({ message: 'You are not allocated to manage this functions.' })
@@ -268,17 +276,135 @@ export default class ClassesController {
    *     ex : if there is division A and B are there , the next one should be C not D or any other .
    */
   async createDivision(ctx: HttpContext) {
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response
         .status(403)
         .json({ message: 'You are not allocated to manage this functions.' })
     }
-    const payload = await CreateValidatorForDivision.validate(ctx.request.body())
 
-    /**
-     * Check it there a default class for this std , (ex for class 3-C , there should be a )
-     */
-    const created_division = await Divisions.create({ ...payload })
+    const body = ctx.request.body()
+    const academicYear = body.academic_year || body.academic_session_id || new Date().getFullYear()
+    const payload = await CreateValidatorForDivision.validate({
+      ...body,
+      academic_year: Number(academicYear),
+    })
+
+    const { academic_session_id, ...divisionData } = payload
+    const created_division = await Divisions.create(divisionData)
     return ctx.response.json(created_division.serialize())
+  }
+
+  async deleteDivision(ctx: HttpContext) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+      return ctx.response
+        .status(403)
+        .json({ message: 'You are not allocated to manage this functions.' })
+    }
+    const division_id = ctx.params.id
+    const division = await Divisions.query().where('id', division_id).first()
+
+    if (!division) {
+      return ctx.response.status(404).json({
+        message: 'Please provide a valid division id',
+      })
+    }
+
+    let trx = await db.transaction()
+
+    try {
+      // 1. Check for dependent student enrollments
+      const studentEnrollment = await db
+        .from('student_enrollments')
+        .where('division_id', division_id)
+        .first()
+
+      if (studentEnrollment) {
+        await trx.rollback()
+        return ctx.response.status(400).json({
+          message: 'Cannot delete division because students are currently enrolled in it.',
+        })
+      }
+
+      // 2. Check for fees plans
+      const feesPlan = await db
+        .from('fees_plans')
+        .where('division_id', division_id)
+        .first()
+
+      if (feesPlan) {
+        await trx.rollback()
+        return ctx.response.status(400).json({
+          message: 'Cannot delete division because fee plans are associated with it.',
+        })
+      }
+
+      // 3. Check for lecture attendance
+      const attendance = await db
+        .from('lecture_attendance_masters')
+        .where('division_id', division_id)
+        .first()
+
+      if (attendance) {
+        await trx.rollback()
+        return ctx.response.status(400).json({
+          message: 'Cannot delete division because attendance records exist for it.',
+        })
+      }
+
+      // Clean up period configuration records referencing this division
+      await db
+        .from('periods_config')
+        .useTransaction(trx)
+        .where('division_id', division_id)
+        .delete()
+
+      // Clean up class teacher assignments
+      await db
+        .from('class_teacher_masters')
+        .useTransaction(trx)
+        .where('division_id', division_id)
+        .delete()
+
+      // Clean up timetable versions
+      await db
+        .from('timetable_versions')
+        .useTransaction(trx)
+        .where('division_id', division_id)
+        .delete()
+
+      // Clean up subjects division staff masters & subjects division masters
+      const subjectDivs = await db
+        .from('subjects_division_masters')
+        .where('division_id', division_id)
+        .select('id')
+
+      const subjectDivIds = subjectDivs.map((s) => s.id)
+      if (subjectDivIds.length > 0) {
+        await db
+          .from('subjects_division_staff_masters')
+          .useTransaction(trx)
+          .whereIn('subjects_division_id', subjectDivIds)
+          .delete()
+      }
+
+      await db
+        .from('subjects_division_masters')
+        .useTransaction(trx)
+        .where('division_id', division_id)
+        .delete()
+
+      // Delete the division
+      await division.useTransaction(trx).delete()
+
+      await trx.commit()
+      return ctx.response.json({ message: 'Division deleted successfully', id: division_id })
+    } catch (error) {
+      await trx.rollback()
+      console.log('Error while deleting division:', error)
+      return ctx.response.status(500).json({
+        message: 'Failed to delete division due to server error.',
+        error: error.message || error,
+      })
+    }
   }
 }

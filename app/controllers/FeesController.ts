@@ -49,10 +49,7 @@ export default class FeesController {
         message: 'Please provide academic_year',
       })
     }
-    let academic_years = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+    let academic_years = [{ id: academic_year, is_active: 1 }]
 
     if (!academic_years) {
       return ctx.response.status(404).json({
@@ -105,10 +102,7 @@ export default class FeesController {
         })
       }
 
-      let academic_years = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', academic_year as number)
-        .andWhere('is_active', 1)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
+      let academic_years = [{ id: academic_year, is_active: 1 }]
 
       if (!academic_years) {
         return ctx.response.status(404).json({
@@ -135,7 +129,7 @@ export default class FeesController {
   }
 
   async createFeesType(ctx: HttpContext) {
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -165,14 +159,14 @@ export default class FeesController {
     let fees_type = await FeesType.create({
       ...payload,
       academic_year: (typeof academic_year !== 'undefined' ? academic_year : 2024) as number,
-      school_id: ctx.auth.user.school_id as number as number as number,
+      school_id: ctx.auth.user!.school_id as number,
     })
 
     return ctx.response.status(201).json(fees_type)
   }
 
   async updateFeesType(ctx: HttpContext) {
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -181,7 +175,7 @@ export default class FeesController {
 
     let fees_type = await FeesType.query()
       .where('id', ctx.params.id)
-      .andWhere('school_id', ctx.auth.user.school_id as number)
+      .andWhere('school_id', ctx.auth.user!.school_id as number)
       .first()
 
     if (!fees_type) {
@@ -190,10 +184,7 @@ export default class FeesController {
       })
     }
 
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', fees_type?.academic_year as number)
-      .andWhere('school_id', ctx.auth.user.school_id as number)
-      .first()
+    let academic_session: any = { id: fees_type?.academic_year, is_active: 1 }
 
     if (!academic_session) {
       return ctx.response.status(404).json({
@@ -232,7 +223,7 @@ export default class FeesController {
   }
 
   async deleteFeesType(ctx: HttpContext) {
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -293,10 +284,7 @@ export default class FeesController {
 
   async indexFeesPlanForSchool(ctx: HttpContext) {
     let academic_year = ctx.request.input('academic_year')
-    let academic_years = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+    let academic_years = [{ id: academic_year, is_active: 1 }]
 
     // let plan_id = ctx.request.input('plan_id');
     if (!academic_years) {
@@ -438,7 +426,7 @@ export default class FeesController {
   }
 
   async createFeePlan(ctx: HttpContext) {
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -554,7 +542,7 @@ export default class FeesController {
       })
     }
 
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -606,7 +594,7 @@ export default class FeesController {
   async updatePlan(ctx: HttpContext) {
 
     let plan_id = ctx.params.plan_id
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -820,7 +808,7 @@ export default class FeesController {
   async deleteFeesPlan(ctx: HttpContext) {
     let plan_id = ctx.params.plan_id
 
-    if (ctx.auth.user?.role_id !== 1) {
+    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -2473,10 +2461,7 @@ export default class FeesController {
     let search = ctx.request.input('search')
     let page = ctx.request.input('page', 1)
 
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+    let academic_session = [{ id: academic_year, is_active: 1 }]
     if (!academic_session) {
       return ctx.response.status(404).json({
         message: 'No active academic year found for this school',
@@ -2525,10 +2510,7 @@ export default class FeesController {
 
   async indexAllConcessionType(ctx: HttpContext) {
     let academic_year = ctx.request.input('academic_year')
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+    let academic_session = [{ id: academic_year, is_active: 1 }]
     if (!academic_session) {
       return ctx.response.status(404).json({
         message: 'No active academic year found for this school',

@@ -224,9 +224,11 @@ export default class SubjectController {
 
     // Academic session check removed
 
+    const academicYear = payload.academic_year || payload.academic_session_id || 0;
+
     let subject = await Subjects.query()
       .where('id', subjectId)
-      .andWhere('academic_year', payload.academic_year as number)
+      .andWhere('academic_year', academicYear as number)
       .first();
 
     if (!subject) {
@@ -235,7 +237,12 @@ export default class SubjectController {
       });
     }
 
-    subject.merge(payload);
+    subject.merge({
+      name: payload.name,
+      description: payload.description || null,
+      year: payload.year || null,
+      academic_year: academicYear,
+    });
     await subject.save();
 
     return ctx.response.status(200).json(subject);

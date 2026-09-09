@@ -45,6 +45,7 @@ export const CreateValidatorStundet = vine.compile(
       is_active: vine.boolean().nullable().optional(),
       remarks: vine.string().trim().nullable().optional(),
       student_type: vine.enum(['SCHOOL', 'COLLEGE']).nullable().optional(),
+      practical_batch: vine.string().trim().nullable().optional(),
     }),
     student_meta_data: vine.object({
       aadhar_dise_no: vine
@@ -243,6 +244,7 @@ export const CreateValidatorForUpload = vine.compile(
 
       is_active: vine.boolean().nullable().optional(),
       student_type: vine.enum(['SCHOOL', 'COLLEGE']).optional(),
+      practical_batch: vine.string().trim().nullable().optional(),
     }),
     student_meta_data: vine
       .object({
@@ -425,6 +427,7 @@ export const CreateValidatorForMultipleStundets = vine.compile(
           aadhar_no: vine.number(),
 
           is_active: vine.boolean().nullable().optional(),
+          practical_batch: vine.string().trim().nullable().optional(),
         }),
         student_meta_data: vine
           .object({
@@ -529,6 +532,7 @@ export const UpdateValidatorForStundets = vine.compile(
 
         is_active: vine.boolean().optional(),
         class_id: vine.number().optional(),
+        practical_batch: vine.string().trim().nullable().optional(),
       })
       .optional(),
 

@@ -5,9 +5,9 @@ import HostelBed from '#models/hostel_bed'
 import db from '@adonisjs/lucid/services/db'
 
 export default class HostelsController {
-  public async index({ request, response }: HttpContext) {
+  public async index({ request, response, auth }: HttpContext) {
     try {
-      const schoolId = request.qs().school_id
+      const schoolId = request.qs().school_id || auth.user?.school_id || request.header('schoolId')
       if (!schoolId) {
         return response.badRequest({ message: 'school_id is required' })
       }
@@ -25,22 +25,23 @@ export default class HostelsController {
       return response.ok(hostels)
     } catch (error: any) {
       const fs = await import('fs')
-      try { fs.appendFileSync('scratch/last_error.log', new Date().toISOString() + '\\n' + String(error.message) + '\\n' + String(error.stack) + '\\n\\n') } catch(e) {}
+      try { fs.appendFileSync('scratch/last_error.log', new Date().toISOString() + '\n' + String(error.message) + '\n' + String(error.stack) + '\n\n') } catch(e) {}
       console.error(error)
       return response.internalServerError({ message: 'Error fetching hostels', error })
     }
   }
 
-  public async store({ request, response }: HttpContext) {
+  public async store({ request, response, auth }: HttpContext) {
     const trx = await db.transaction()
     try {
-      const payload = request.only(['school_id', 'name', 'type', 'address', 'capacity', 'status', 'number_of_rooms', 'beds_per_room'])
-      if (!payload.school_id) {
+      const payload = request.only(['school_id', 'name', 'type', 'address', 'capacity', 'status', 'number_of_rooms', 'number_of_floors', 'beds_per_room'])
+      const schoolId = payload.school_id || auth.user?.school_id || request.header('schoolId')
+      if (!schoolId) {
          return response.badRequest({ message: 'school_id is required', received: request.all() })
       }
 
       const hostel = await Hostel.create({
-        schoolId: payload.school_id,
+        schoolId: Number(schoolId),
         name: payload.name,
         type: payload.type,
         address: payload.address,
@@ -49,25 +50,35 @@ export default class HostelsController {
       }, { client: trx })
 
       if (payload.number_of_rooms && payload.beds_per_room) {
-        for (let i = 1; i <= payload.number_of_rooms; i++) {
-          const room = await HostelRoom.create({
-            hostelId: hostel.id,
-            roomNumber: `1${String(i).padStart(2, '0')}`, // e.g. 101, 102
-            floor: 'Ground Floor',
-            capacity: payload.beds_per_room,
-            status: 'Active',
-          }, { client: trx })
+        const numberOfFloors = Math.max(1, payload.number_of_floors || 1)
+        const roomsPerFloor = Math.ceil(payload.number_of_rooms / numberOfFloors)
+        let roomCount = 0
 
-          const beds = []
-          for (let j = 0; j < payload.beds_per_room; j++) {
-            const bedLetter = String.fromCharCode(65 + j)
-            beds.push({
-              roomId: room.id,
-              bedNumber: `${room.roomNumber}-${bedLetter}`,
-              status: 'Available' as const,
-            })
+        for (let f = 0; f < numberOfFloors; f++) {
+          const floorName = f === 0 ? 'Ground Floor' : `${f}${f === 1 ? 'st' : f === 2 ? 'nd' : f === 3 ? 'rd' : 'th'} Floor`
+
+          for (let i = 1; i <= roomsPerFloor && roomCount < payload.number_of_rooms; i++) {
+            roomCount++
+            const roomNumber = `${f + 1}${String(i).padStart(2, '0')}` // e.g., 101, 102 for Ground, 201, 202 for 1st Floor
+            const room = await HostelRoom.create({
+              hostelId: hostel.id,
+              roomNumber,
+              floor: floorName,
+              capacity: payload.beds_per_room,
+              status: 'Active',
+            }, { client: trx })
+
+            const beds = []
+            for (let j = 0; j < payload.beds_per_room; j++) {
+              const bedLetter = String.fromCharCode(65 + j)
+              beds.push({
+                roomId: room.id,
+                bedNumber: `${room.roomNumber}-${bedLetter}`,
+                status: 'Available' as const,
+              })
+            }
+            await HostelBed.createMany(beds, { client: trx })
           }
-          await HostelBed.createMany(beds, { client: trx })
         }
       }
 

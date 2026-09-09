@@ -5,6 +5,10 @@ import db from '@adonisjs/lucid/services/db'
 import { DateTime } from 'luxon'
 
 export default class HostelAllocationsController {
+  public async store(ctx: HttpContext) {
+    return this.allocate(ctx)
+  }
+
   public async allocate({ request, response }: HttpContext) {
     const trx = await db.transaction()
     try {
