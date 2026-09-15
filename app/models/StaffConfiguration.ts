@@ -12,7 +12,7 @@ export default class StaffConfiguration extends Base {
   declare school_id: number
 
   @column()
-  declare config_type: 'STAFF_TYPE' | 'STAFF_CATEGORY' | 'DESIGNATION'
+  declare config_type: 'STAFF_TYPE' | 'STAFF_CATEGORY' | 'DESIGNATION' | 'EMPLOYMENT_STATUS' | 'LETTER_TYPE' | 'SUBJECT_SPECIALIZATION' | 'QUALIFICATION'
 
   @column()
   declare name: string

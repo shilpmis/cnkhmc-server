@@ -55,7 +55,7 @@ export const CreateValidatorForTeachers = vine.compile(
       qualification: vine.string().nullable().optional(),
       joining_date: vine.date().nullable().optional(),
 
-      employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']),
+      employment_status: vine.string().trim().maxLength(100),
 
     })
   )
@@ -81,7 +81,7 @@ export const UpdateValidatorForTeachers = vine.compile(
 
     qualification: vine.string().optional(),
     joining_date: vine.date().optional(),
-    employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']).optional(),
+    employment_status: vine.string().trim().maxLength(100).optional(),
 
   })
 )
@@ -136,7 +136,7 @@ export const CreateValidatorForSingleTeacher = vine.compile(
     qualification: vine.string().nullable().optional(),
     joining_date: vine.date().nullable().optional(),
 
-    employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']),
+    employment_status: vine.string().trim().maxLength(100),
 
 
   })

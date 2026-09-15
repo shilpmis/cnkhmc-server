@@ -7,6 +7,8 @@ import ClassTeacherMaster from '#models/Classteachermaster'
 import StaffEnrollment from './StaffEnrollment.js'
 import Department from './Department.js'
 import StaffExperience from './staff_experience.js'
+import LeaveTemplate from './LeaveTemplate.js'
+import StaffLetter from './StaffLetter.js'
 
 export default class Staff extends Base {
   @column()
@@ -14,6 +16,9 @@ export default class Staff extends Base {
 
   @column()
   declare staff_role_id: number
+
+  @column()
+  declare leave_template_id: number | null
 
   @column()
   declare school_id: number
@@ -262,6 +267,15 @@ export default class Staff extends Base {
   declare pg_passing_year: number | null
 
   @column()
+  declare diploma_degree: string | null
+
+  @column()
+  declare diploma_council: string | null
+
+  @column()
+  declare diploma_passing_year: number | null
+
+  @column()
   declare other_degree: string | null
 
   @column()
@@ -392,8 +406,6 @@ export default class Staff extends Base {
   })
   declare enrollments: HasMany<typeof StaffEnrollment>
 
-
-
   @belongsTo(() => Department, {
     localKey: 'id',
     foreignKey: 'department_id',
@@ -405,4 +417,16 @@ export default class Staff extends Base {
     foreignKey: 'staff_id',
   })
   declare experiences: HasMany<typeof StaffExperience>
+
+  @hasMany(() => StaffLetter, {
+    localKey: 'id',
+    foreignKey: 'staff_id',
+  })
+  declare letters: HasMany<typeof StaffLetter>
+
+  @belongsTo(() => LeaveTemplate, {
+    localKey: 'id',
+    foreignKey: 'leave_template_id',
+  })
+  declare leave_template: BelongsTo<typeof LeaveTemplate>
 }

@@ -3,6 +3,7 @@ import { column, belongsTo } from '@adonisjs/lucid/orm'
 import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import StaffMaster from './StaffMaster.js'
 import LeaveTypeMaster from './LeaveTypeMaster.js'
+import LeaveTemplate from './LeaveTemplate.js'
 
 export default class LeavePolicies extends Base {
   @column()
@@ -12,7 +13,10 @@ export default class LeavePolicies extends Base {
   declare academic_year: number
 
   @column()
-  declare staff_role_id: number
+  declare staff_role_id: number | null
+
+  @column()
+  declare leave_template_id: number | null
 
   @column()
   declare leave_type_id: number
@@ -38,9 +42,6 @@ export default class LeavePolicies extends Base {
   @column()
   declare approval_hierarchy: Object
 
-  // @column()
-  // declare is_active : boolean
-
   @belongsTo(() => StaffMaster, {
     localKey: 'id',
     foreignKey: 'staff_role_id',
@@ -52,4 +53,10 @@ export default class LeavePolicies extends Base {
     foreignKey: 'leave_type_id',
   })
   declare leave_type: BelongsTo<typeof LeaveTypeMaster>
+
+  @belongsTo(() => LeaveTemplate, {
+    localKey: 'id',
+    foreignKey: 'leave_template_id',
+  })
+  declare leave_template: BelongsTo<typeof LeaveTemplate>
 }

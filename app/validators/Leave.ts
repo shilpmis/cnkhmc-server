@@ -24,22 +24,22 @@ export const UpdateValidatorForLeaveType = vine.compile(
 export const CreateValidatorForLeavePolicies = vine.compile(
   vine.object({
     academic_year: vine.number(),
-    staff_role_id: vine.number(),
+    staff_role_id: vine.number().optional().nullable(),
     leave_type_id: vine.number(),
     annual_quota: vine.number(),
     can_carry_forward: vine.boolean(),
     max_carry_forward_days: vine.number(),
     max_consecutive_days: vine.number(),
     requires_approval: vine.boolean(),
-    approval_hierarchy: vine.object({}),
-    deduction_rules: vine.object({}),
+    approval_hierarchy: vine.object({}).optional(),
+    deduction_rules: vine.object({}).optional(),
   })
 )
 
 export const UpdateValidatorForLeavePolicies = vine.compile(
   vine.object({
-    // staff_role_id: vine.number(),
-    // leave_type_id: vine.number(),
+    staff_role_id: vine.number().optional().nullable(),
+    leave_type_id: vine.number().optional(),
     annual_quota: vine.number().optional(),
     can_carry_forward: vine.boolean().optional(),
     max_carry_forward_days: vine.number().optional(),

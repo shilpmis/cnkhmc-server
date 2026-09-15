@@ -33,7 +33,7 @@ export const CreateValidatorForStaff = vine.compile(
 
     joining_date: vine.date().nullable().optional(),
 
-    employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']),
+    employment_status: vine.string().trim().maxLength(100),
     experience_years: vine.number().nullable().optional(),
 
     aadhar_no: vine.number().nullable().optional(),
@@ -50,6 +50,7 @@ export const CreateValidatorForStaff = vine.compile(
     nationality: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
 
     address: vine.string().trim().minLength(2).maxLength(255).nullable().optional(),
+    permanent_address: vine.string().trim().maxLength(255).nullable().optional(),
     district: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
     city: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
     state: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
@@ -107,6 +108,9 @@ export const CreateValidatorForStaff = vine.compile(
     pg_degree: vine.string().trim().maxLength(100).nullable().optional(),
     pg_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
     pg_passing_year: vine.number().nullable().optional(),
+    diploma_degree: vine.string().trim().maxLength(100).nullable().optional(),
+    diploma_council: vine.string().trim().maxLength(255).nullable().optional(),
+    diploma_passing_year: vine.number().nullable().optional(),
     other_degree: vine.string().trim().maxLength(100).nullable().optional(),
     other_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
     other_passing_year: vine.number().nullable().optional(),
@@ -114,6 +118,17 @@ export const CreateValidatorForStaff = vine.compile(
     resignation_date: vine.date().nullable().optional(),
     retirement_date: vine.date().nullable().optional(),
     retirement_age: vine.number().nullable().optional(),
+    leave_policy_ids: vine.array(vine.number()).optional(),
+    letters: vine.array(
+      vine.object({
+        id: vine.number().optional(),
+        letter_type: vine.string().trim(),
+        letter_type_id: vine.number().nullable().optional(),
+        letter_no: vine.string().trim().nullable().optional(),
+        letter_date: vine.date().nullable().optional(),
+        remarks: vine.string().trim().nullable().optional(),
+      })
+    ).optional(),
   })
 )
 
@@ -136,7 +151,7 @@ export const CreateValidatorForMultipleStaff = vine.compile(
 
       joining_date: vine.date(),
 
-      employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']),
+      employment_status: vine.string().trim().maxLength(100),
       
       nch_registration_no: vine.string().trim().maxLength(100).nullable().optional(),
       nch_registration_date: vine.date().nullable().optional(),
@@ -152,6 +167,7 @@ export const CreateValidatorForMultipleStaff = vine.compile(
 export const UpdateValidatorForStaff = vine.compile(
   vine.object({
     remarks: vine.string().trim().minLength(2).maxLength(255).optional(),
+    staff_role_id: vine.number().optional(),
 
     first_name: vine.string().trim().minLength(1).maxLength(50).optional(),
     middle_name: vine.string().trim().minLength(1).maxLength(50).nullable().optional(),
@@ -178,7 +194,7 @@ export const UpdateValidatorForStaff = vine.compile(
 
     joining_date: vine.date().nullable().optional(),
 
-    employment_status: vine.enum(['Permanent', 'Trial_Period', 'Resigned', 'Contract_Based', 'Notice_Period']),
+    employment_status: vine.string().trim().maxLength(100).optional(),
     experience_years: vine.number().nullable().optional(),
 
     aadhar_no: vine.number().nullable().optional(),
@@ -195,6 +211,7 @@ export const UpdateValidatorForStaff = vine.compile(
     nationality: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
 
     address: vine.string().trim().minLength(2).maxLength(255).nullable().optional(),
+    permanent_address: vine.string().trim().maxLength(255).nullable().optional(),
     district: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
     city: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
     state: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
@@ -252,6 +269,9 @@ export const UpdateValidatorForStaff = vine.compile(
     pg_degree: vine.string().trim().maxLength(100).nullable().optional(),
     pg_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
     pg_passing_year: vine.number().nullable().optional(),
+    diploma_degree: vine.string().trim().maxLength(100).nullable().optional(),
+    diploma_council: vine.string().trim().maxLength(255).nullable().optional(),
+    diploma_passing_year: vine.number().nullable().optional(),
     other_degree: vine.string().trim().maxLength(100).nullable().optional(),
     other_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
     other_passing_year: vine.number().nullable().optional(),
@@ -259,6 +279,17 @@ export const UpdateValidatorForStaff = vine.compile(
     resignation_date: vine.date().nullable().optional(),
     retirement_date: vine.date().nullable().optional(),
     retirement_age: vine.number().nullable().optional(),
+    leave_policy_ids: vine.array(vine.number()).optional(),
+    letters: vine.array(
+      vine.object({
+        id: vine.number().optional(),
+        letter_type: vine.string().trim(),
+        letter_type_id: vine.number().nullable().optional(),
+        letter_no: vine.string().trim().nullable().optional(),
+        letter_date: vine.date().nullable().optional(),
+        remarks: vine.string().trim().nullable().optional(),
+      })
+    ).optional(),
   })
 )
 
@@ -309,6 +340,7 @@ export const CreateValidatorForBulkUpload = vine.compile(
     nationality: vine.string().trim().maxLength(50).nullable().optional(),
 
     address: vine.string().trim().maxLength(255).nullable().optional(),
+    permanent_address: vine.string().trim().maxLength(255).nullable().optional(),
     district: vine.string().trim().maxLength(50).nullable().optional(),
     city: vine.string().trim().maxLength(50).nullable().optional(),
     state: vine.string().trim().maxLength(50).nullable().optional(),
@@ -371,6 +403,9 @@ export const CreateValidatorForBulkUpload = vine.compile(
     pg_degree: vine.string().trim().maxLength(100).nullable().optional(),
     pg_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
     pg_passing_year: vine.number().nullable().optional(),
+    diploma_degree: vine.string().trim().maxLength(100).nullable().optional(),
+    diploma_council: vine.string().trim().maxLength(255).nullable().optional(),
+    diploma_passing_year: vine.number().nullable().optional(),
     other_degree: vine.string().trim().maxLength(100).nullable().optional(),
     other_passing_university: vine.string().trim().maxLength(255).nullable().optional(),
     other_passing_year: vine.number().nullable().optional(),

@@ -35,8 +35,11 @@ interface TypeForPeriodsConfig {
   subjects_division_masters_id: number | null;
   staff_enrollment_id: number | null;
   lab_id: number | null;
-  is_pt: boolean;
+  is_pt?: boolean;
   is_free_period: boolean;
+  is_library?: boolean;
+  is_seminar?: boolean;
+  batch_name?: string | null;
 }
 
 
@@ -281,7 +284,7 @@ export default class TimeTableController {
   }
 
   async updateLabConfig(ctx: HttpContext) {
-    const { lab_id } = ctx.request.all();
+    const lab_id = ctx.params.lab_id || ctx.request.input('lab_id');
     const payload = await UpdateValidatorForLabConfig.validate(ctx.request.all());
 
     if (!lab_id) {
@@ -327,7 +330,7 @@ export default class TimeTableController {
   }
 
   async deleteLabConfig(ctx: HttpContext) {
-    const { lab_id } = ctx.request.all();
+    const lab_id = ctx.params.lab_id || ctx.request.input('lab_id');
 
     if (!lab_id) {
       return ctx.response.badRequest({ message: 'lab_id is required' });
@@ -338,15 +341,21 @@ export default class TimeTableController {
       return ctx.response.notFound({ message: 'Lab config not found' });
     }
 
-    // Check if there are any periods assigned to this lab
-    const periods = await PeriodsConfig.query().where('lab_id', lab_id).first();
-    if (periods) {
-      return ctx.response.badRequest({ message: 'Cannot delete lab config. There are periods assigned to this lab.' });
+    const trx = await db.transaction();
+    try {
+      // Unlink any periods currently referencing this lab
+      await PeriodsConfig.query({ client: trx })
+        .where('lab_id', lab_id)
+        .update({ lab_id: null });
+
+      await labConfig.useTransaction(trx).delete();
+      await trx.commit();
+
+      return ctx.response.ok({ message: 'Lab config deleted successfully' });
+    } catch (error) {
+      await trx.rollback();
+      throw error;
     }
-
-    await labConfig.delete();
-
-    return ctx.response.ok({ message: 'Lab config deleted successfully' });
   }
 
 
@@ -535,8 +544,10 @@ export default class TimeTableController {
           subjects_division_masters_id: period.subjects_division_masters_id,
           staff_enrollment_id: period.staff_enrollment_id,
           lab_id: period.lab_id,
-          is_pt: period.is_pt,
-          is_free_period: period.is_free_period
+          is_pt: period.is_pt || false,
+          is_free_period: period.is_free_period,
+          is_library: period.is_library || false,
+          is_seminar: period.is_seminar || false,
         }, { client: trx })
         res.push(period_config)
       }
@@ -626,6 +637,8 @@ export default class TimeTableController {
         if (period.lab_id !== undefined) payload_to_update.lab_id = period.lab_id
         if (period.is_pt !== undefined) payload_to_update.is_pt = period.is_pt
         if (period.is_free_period !== undefined) payload_to_update.is_free_period = period.is_free_period
+        if (period.is_library !== undefined) payload_to_update.is_library = period.is_library
+        if (period.is_seminar !== undefined) payload_to_update.is_seminar = period.is_seminar
         if (period.batch_name !== undefined) payload_to_update.batch_name = period.batch_name
         
         if (period.is_break !== undefined) {
@@ -636,6 +649,8 @@ export default class TimeTableController {
             payload_to_update.lab_id = null
             payload_to_update.is_pt = false
             payload_to_update.is_free_period = false
+            payload_to_update.is_library = false
+            payload_to_update.is_seminar = false
             payload_to_update.batch_name = null
           }
         }
@@ -644,7 +659,7 @@ export default class TimeTableController {
         const mergedPeriod = { ...check_period_config.toJSON(), ...payload_to_update } as TypeForPeriodsConfig;
 
         // Validation checks
-        if (!mergedPeriod.is_break && !mergedPeriod.is_pt && !mergedPeriod.is_free_period) {
+        if (!mergedPeriod.is_break && !mergedPeriod.is_pt && !mergedPeriod.is_free_period && !mergedPeriod.is_library && !mergedPeriod.is_seminar) {
           if (mergedPeriod.staff_enrollment_id) {
             const teacher_available = await this.checkTeacherAvailability(mergedPeriod, class_day_config, school_timetable_config)
             if (!teacher_available.result) {
@@ -769,6 +784,8 @@ export default class TimeTableController {
           if (period.lab_id !== undefined) payload_to_update.lab_id = period.lab_id
           if (period.is_pt !== undefined) payload_to_update.is_pt = period.is_pt
           if (period.is_free_period !== undefined) payload_to_update.is_free_period = period.is_free_period
+          if (period.is_library !== undefined) payload_to_update.is_library = period.is_library
+          if (period.is_seminar !== undefined) payload_to_update.is_seminar = period.is_seminar
           if (period.batch_name !== undefined) payload_to_update.batch_name = period.batch_name
           
           if (period.is_break !== undefined) {
@@ -779,13 +796,15 @@ export default class TimeTableController {
               payload_to_update.lab_id = null
               payload_to_update.is_pt = false
               payload_to_update.is_free_period = false
+              payload_to_update.is_library = false
+              payload_to_update.is_seminar = false
               payload_to_update.batch_name = null
             }
           }
 
           const mergedPeriod = { ...check_period_config.toJSON(), ...payload_to_update } as TypeForPeriodsConfig;
 
-          if (!mergedPeriod.is_break && !mergedPeriod.is_pt && !mergedPeriod.is_free_period) {
+          if (!mergedPeriod.is_break && !mergedPeriod.is_pt && !mergedPeriod.is_free_period && !mergedPeriod.is_library && !mergedPeriod.is_seminar) {
             if (mergedPeriod.staff_enrollment_id) {
               const teacher_available = await this.checkTeacherAvailability(mergedPeriod, class_day_config, school_timetable_config)
               if (!teacher_available.result) {
@@ -1784,6 +1803,10 @@ export default class TimeTableController {
 
         if (period.is_break) {
           cellContent.push({ text: 'BREAK', style: 'breakText', alignment: 'center', bold: true })
+        } else if (period.is_library) {
+          cellContent.push({ text: 'LIBRARY', style: 'libraryText', alignment: 'center', bold: true })
+        } else if (period.is_seminar) {
+          cellContent.push({ text: 'SEMINAR', style: 'seminarText', alignment: 'center', bold: true })
         } else if (period.is_pt) {
           cellContent.push({ text: 'PT', style: 'ptText', alignment: 'center', bold: true })
         } else if (period.is_free_period) {
@@ -1813,6 +1836,8 @@ export default class TimeTableController {
         // Determine background colors to fit premium design
         let fillColor = '#f8fafc'
         if (period.is_break) fillColor = '#fef3c7'
+        else if (period.is_library) fillColor = '#e0f2fe'
+        else if (period.is_seminar) fillColor = '#f3e8ff'
         else if (period.is_pt) fillColor = '#f3e8ff'
         else if (period.is_free_period) fillColor = '#f1f5f9'
         else if (period.lab_id) fillColor = '#dbeafe'

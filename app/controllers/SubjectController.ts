@@ -3,6 +3,7 @@ import StaffEnrollment from '#models/StaffEnrollment';
 import SubjectDivisionMaster from '#models/SubjectDivisionMaster';
 import SubjectDivisionStaffMaster from '#models/SubjectDivisionStaffMaster';
 import Subjects from '#models/Subjects';
+import PeriodsConfig from '#models/PeriodsConfig';
 import { CreateValidatorForAssignSubject, CreateValidatorForAssignSubjectToStaff, CreateValidatorForSubject } from '#validators/Subject'
 import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db';
@@ -72,13 +73,14 @@ export default class SubjectController {
 
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
     const academicYear = payload.academic_year || payload.academic_session_id || 0;
+    const subjectCode = payload.code && payload.code.trim().length > 0 ? payload.code.trim() : `SUB${randomDigits}`;
 
     let subject = await Subjects.create({ 
       name: payload.name,
       description: payload.description || null,
       academic_year: academicYear,
       year: payload.year || null,
-      code: `SUB${randomDigits}` 
+      code: subjectCode 
     });
 
     return ctx.response.status(201).json(subject);
@@ -212,6 +214,54 @@ export default class SubjectController {
     }
   }
 
+  async unassignSubjectFromDivision(ctx: HttpContext) {
+    const id = Number(ctx.params.id);
+
+    try {
+      const assignedSubject = await SubjectDivisionMaster.find(id);
+
+      if (!assignedSubject) {
+        return ctx.response.status(404).json({
+          message: 'Subject assignment not found',
+        });
+      }
+
+      const trx = await db.transaction();
+      try {
+        // 1. Unlink any periods in timetable that reference this subject division
+        await PeriodsConfig.query({ client: trx })
+          .where('subjects_division_masters_id', id)
+          .update({
+            subjects_division_masters_id: null,
+            staff_enrollment_id: null,
+          });
+
+        // 2. Delete any assigned teachers for this subject in this division
+        await SubjectDivisionStaffMaster.query({ client: trx })
+          .where('subjects_division_id', id)
+          .delete();
+
+        // 3. Delete the subject division assignment
+        await assignedSubject.useTransaction(trx).delete();
+
+        await trx.commit();
+
+        return ctx.response.status(200).json({
+          message: 'Subject successfully unassigned from division',
+        });
+      } catch (error) {
+        await trx.rollback();
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error unassigning subject from division:", error);
+      return ctx.response.status(500).json({
+        message: 'Internal server error',
+        error: error,
+      });
+    }
+  }
+
   async updateSubject(ctx: HttpContext) {
     const subjectId = Number(ctx.params.subject_id);
     let payload = await CreateValidatorForSubject.validate(ctx.request.body());
@@ -226,10 +276,7 @@ export default class SubjectController {
 
     const academicYear = payload.academic_year || payload.academic_session_id || 0;
 
-    let subject = await Subjects.query()
-      .where('id', subjectId)
-      .andWhere('academic_year', academicYear as number)
-      .first();
+    let subject = await Subjects.find(subjectId);
 
     if (!subject) {
       return ctx.response.status(404).json({
@@ -241,7 +288,8 @@ export default class SubjectController {
       name: payload.name,
       description: payload.description || null,
       year: payload.year || null,
-      academic_year: academicYear,
+      ...(payload.code && payload.code.trim().length > 0 ? { code: payload.code.trim() } : {}),
+      academic_year: academicYear || subject.academic_year,
     });
     await subject.save();
 
@@ -251,29 +299,76 @@ export default class SubjectController {
   async destroySubject(ctx: HttpContext) {
     const subjectId = Number(ctx.params.subject_id);
 
-    const isAssigned = await SubjectDivisionMaster.query()
-      .where('subject_id', subjectId)
-      .first();
+    try {
+      const subject = await Subjects.find(subjectId);
+      if (!subject) {
+        return ctx.response.status(404).json({
+          message: 'Subject not found',
+        });
+      }
 
-    if (isAssigned) {
-      return ctx.response.status(400).json({
-        message: 'Subject is assigned to a division and cannot be deleted',
+      // Check for division assignments
+      const divisionAssignments = await SubjectDivisionMaster.query().where('subject_id', subjectId);
+      const divisionAssignmentIds = divisionAssignments.map((d) => d.id);
+
+      const trx = await db.transaction();
+      try {
+        if (divisionAssignmentIds.length > 0) {
+          // 1. Unlink any periods in timetable that reference these division assignments
+          await PeriodsConfig.query({ client: trx })
+            .whereIn('subjects_division_masters_id', divisionAssignmentIds)
+            .update({
+              subjects_division_masters_id: null,
+              staff_enrollment_id: null,
+            });
+
+          // 2. Remove staff assignments for these divisions
+          await SubjectDivisionStaffMaster.query({ client: trx })
+            .whereIn('subjects_division_id', divisionAssignmentIds)
+            .delete();
+
+          // 3. Remove division assignments
+          await SubjectDivisionMaster.query({ client: trx })
+            .where('subject_id', subjectId)
+            .delete();
+        }
+
+        // 4. Clean up lecture attendance records if any exist for this subject
+        const attendanceMasters = await db.from('lecture_attendance_masters')
+          .useTransaction(trx)
+          .where('subject_id', subjectId)
+          .select('id');
+        if (attendanceMasters.length > 0) {
+          const masterIds = attendanceMasters.map((m: any) => m.id);
+          await db.from('lecture_attendance_details')
+            .useTransaction(trx)
+            .whereIn('lecture_attendance_master_id', masterIds)
+            .delete();
+          await db.from('lecture_attendance_masters')
+            .useTransaction(trx)
+            .where('subject_id', subjectId)
+            .delete();
+        }
+
+        // 5. Delete the subject
+        await subject.useTransaction(trx).delete();
+
+        await trx.commit();
+
+        return ctx.response.status(200).json({
+          message: 'Subject deleted successfully',
+        });
+      } catch (error) {
+        await trx.rollback();
+        throw error;
+      }
+    } catch (error: any) {
+      console.error('Error deleting subject:', error);
+      return ctx.response.status(500).json({
+        message: 'Failed to delete subject',
+        error: error?.message,
       });
     }
-
-    const subject = await Subjects.find(subjectId);
-
-    if (!subject) {
-      return ctx.response.status(404).json({
-        message: 'Subject not found',
-      });
-    }
-
-    await subject.delete();
-
-    return ctx.response.status(200).json({
-      message: 'Subject deleted successfully',
-    });
   }
 
 }

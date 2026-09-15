@@ -205,6 +205,10 @@ router
           LeavesController,
           'updateLeavePolicyForSchool',
         ])
+        router.delete('leave-policy/:leave_policy_id', [
+          LeavesController,
+          'deleteLeavePolicyForSchool',
+        ])
 
         // Enhanced leave management routes
         router.get('leave-applications/:staff_id', [LeavesController, 'fetchLeaveApplication'])
@@ -399,7 +403,9 @@ router
     router.put('subject/:subject_id', [SubjectController, 'updateSubject'])
     router.delete('subject/:subject_id', [SubjectController, 'destroySubject'])
     router.post('subject/assign', [SubjectController, 'assignSubjectToDivision'])
+    router.delete('subject/assign/:id', [SubjectController, 'unassignSubjectFromDivision'])
     router.post('subject/assign/staffs', [SubjectController, 'assignStaffToSubject'])
+    router.delete('subject/assign/staffs/:id', [SubjectController, 'unassignStaffFromSubject'])
 
     // time table
     router.get('timetable/config/:academic_year', [

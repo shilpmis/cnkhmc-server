@@ -12,6 +12,9 @@ import app from '@adonisjs/core/services/app'
 import { parseAndReturnJSON } from '../../utility/parseCsv.js'
 import ExcelJS from 'exceljs'
 import User from '#models/User'
+import LeavePolicies from '#models/LeavePolicies'
+import StaffLeaveBalance from '#models/StaffLeaveBalance'
+import StaffLetter from '#models/StaffLetter'
 
 export default class StaffController {
   /**
@@ -161,6 +164,7 @@ export default class StaffController {
         .where('id', staffId)
         .where('school_id', school_id)
         .preload('role_type')  // Load staff role details
+        .preload('letters')
         .preload('assigend_classes', (query) => {
           return query.preload('divisions', (divisionQuery) => {
             divisionQuery.preload('class')
@@ -467,6 +471,52 @@ export default class StaffController {
         { client: trx }
       )
 
+      // Seed initial staff leave balances from active school leave policies
+      let policiesQuery = LeavePolicies.query({ client: trx })
+        .where('school_id', school_id as number)
+        .andWhere('academic_year', academic_session_id as number)
+
+      if (payload.leave_policy_ids && Array.isArray(payload.leave_policy_ids) && payload.leave_policy_ids.length > 0) {
+        policiesQuery = policiesQuery.whereIn('id', payload.leave_policy_ids)
+      }
+
+      const policies = await policiesQuery
+
+      for (const policy of policies) {
+        await StaffLeaveBalance.create(
+          {
+            staff_id: staff.id,
+            leave_type_id: policy.leave_type_id,
+            academic_year: academic_session_id as number,
+            total_leaves: policy.annual_quota,
+            used_leaves: 0,
+            pending_leaves: 0,
+            carried_forward: 0,
+            available_balance: policy.annual_quota,
+          },
+          { client: trx }
+        )
+      }
+
+      // Save staff letters if provided
+      if (payload.letters && Array.isArray(payload.letters)) {
+        for (const letter of payload.letters) {
+          if (letter.letter_type || letter.letter_no) {
+            await StaffLetter.create(
+              {
+                staff_id: staff.id,
+                letter_type: letter.letter_type,
+                letter_type_id: letter.letter_type_id || null,
+                letter_no: letter.letter_no || null,
+                letter_date: letter.letter_date ? new Date(letter.letter_date) : null,
+                remarks: letter.remarks || null,
+              },
+              { client: trx }
+            )
+          }
+        }
+      }
+
       // Commit the transaction
       await trx.commit()
 
@@ -544,6 +594,65 @@ export default class StaffController {
         if (user) {
           user.is_active = false
           await user.save()
+        }
+      }
+
+      if (payload.leave_policy_ids && Array.isArray(payload.leave_policy_ids)) {
+        const academic_session_id =
+          ctx.request.input('academic_sessions') ||
+          ctx.request.input('academic_session_id') ||
+          ctx.request.input('academic_year') ||
+          (ctx.session ? ctx.session.get('academic_session_id') : null) ||
+          new Date().getFullYear()
+        if (academic_session_id) {
+          const selectedPolicies = await LeavePolicies.query({ client: trx })
+            .where('school_id', school_id)
+            .andWhere('academic_year', academic_session_id)
+            .whereIn('id', payload.leave_policy_ids)
+
+          const existingBalances = await StaffLeaveBalance.query({ client: trx })
+            .where('staff_id', staff.id)
+            .andWhere('academic_year', academic_session_id)
+
+          const existingLeaveTypeIds = new Set(existingBalances.map((b) => b.leave_type_id))
+
+          for (const policy of selectedPolicies) {
+            if (!existingLeaveTypeIds.has(policy.leave_type_id)) {
+              await StaffLeaveBalance.create(
+                {
+                  staff_id: staff.id,
+                  leave_type_id: policy.leave_type_id,
+                  academic_year: academic_session_id as number,
+                  total_leaves: policy.annual_quota,
+                  used_leaves: 0,
+                  pending_leaves: 0,
+                  carried_forward: 0,
+                  available_balance: policy.annual_quota,
+                },
+                { client: trx }
+              )
+            }
+          }
+        }
+      }
+
+      // Sync staff letters if provided
+      if (payload.letters !== undefined && Array.isArray(payload.letters)) {
+        await StaffLetter.query({ client: trx }).where('staff_id', staff.id).delete()
+        for (const letter of payload.letters) {
+          if (letter.letter_type || letter.letter_no) {
+            await StaffLetter.create(
+              {
+                staff_id: staff.id,
+                letter_type: letter.letter_type,
+                letter_type_id: letter.letter_type_id || null,
+                letter_no: letter.letter_no || null,
+                letter_date: letter.letter_date ? new Date(letter.letter_date) : null,
+                remarks: letter.remarks || null,
+              },
+              { client: trx }
+            )
+          }
         }
       }
 
@@ -652,6 +761,10 @@ export default class StaffController {
       pgpassinguniversity: 'pg_passing_university',
       pguniversity: 'pg_passing_university',
       pgpassingyear: 'pg_passing_year',
+      diplomadegree: 'diploma_degree',
+      diplomacouncil: 'diploma_council',
+      diplomapassingyear: 'diploma_passing_year',
+      diplomayear: 'diploma_passing_year',
       otherqualifications: 'other_degree',
       otherdegree: 'other_degree',
       registrationauthority: 'registration_authority',
@@ -836,19 +949,20 @@ export default class StaffController {
 
     // Normalize employment_status
     if (mappedData.employment_status) {
-      const status = mappedData.employment_status.toString().toLowerCase()
-      if (status.includes('active') || status.includes('permanent') || status.includes('full')) {
+      const status = mappedData.employment_status.toString().trim()
+      const lower = status.toLowerCase()
+      if (lower.includes('permanent') || lower === 'active') {
         mappedData.employment_status = 'Permanent'
-      } else if (status.includes('probation') || status.includes('trial')) {
+      } else if (lower.includes('trial')) {
         mappedData.employment_status = 'Trial_Period'
-      } else if (status.includes('contract')) {
+      } else if (lower.includes('contract')) {
         mappedData.employment_status = 'Contract_Based'
-      } else if (status.includes('resign')) {
+      } else if (lower.includes('resign')) {
         mappedData.employment_status = 'Resigned'
-      } else if (status.includes('notice')) {
+      } else if (lower.includes('notice')) {
         mappedData.employment_status = 'Notice_Period'
       } else {
-        mappedData.employment_status = 'Permanent'
+        mappedData.employment_status = status
       }
     } else {
       mappedData.employment_status = 'Permanent'
@@ -1054,13 +1168,14 @@ export default class StaffController {
             else data.category = null
           }
           if (data.employment_status) {
-            const e = String(data.employment_status).trim().toLowerCase()
-            if (e.includes('permanent')) data.employment_status = 'Permanent'
-            else if (e.includes('trial')) data.employment_status = 'Trial_Period'
-            else if (e.includes('contract')) data.employment_status = 'Contract_Based'
-            else if (e.includes('notice')) data.employment_status = 'Notice_Period'
-            else if (e.includes('resigned')) data.employment_status = 'Resigned'
-            else data.employment_status = 'Permanent'
+            const e = String(data.employment_status).trim()
+            const lower = e.toLowerCase()
+            if (lower.includes('permanent') || lower === 'active') data.employment_status = 'Permanent'
+            else if (lower.includes('trial')) data.employment_status = 'Trial_Period'
+            else if (lower.includes('contract')) data.employment_status = 'Contract_Based'
+            else if (lower.includes('notice')) data.employment_status = 'Notice_Period'
+            else if (lower.includes('resigned')) data.employment_status = 'Resigned'
+            else data.employment_status = e
           }
 
           const rawRoleName = (data.role || data.designation || data.staff_category || data.post || '').toString().trim()

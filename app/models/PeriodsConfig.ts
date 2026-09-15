@@ -46,6 +46,12 @@ export default class PeriodsConfig extends Base {
     declare is_free_period : boolean
 
     @column()
+    declare is_library : boolean
+
+    @column()
+    declare is_seminar : boolean
+
+    @column()
     declare batch_name: string | null
 
     @belongsTo(() => LabConfig, {

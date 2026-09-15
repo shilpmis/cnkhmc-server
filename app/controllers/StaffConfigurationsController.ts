@@ -27,7 +27,7 @@ export default class StaffConfigurationsController {
     
     const validator = vine.compile(
       vine.object({
-        config_type: vine.enum(['STAFF_TYPE', 'STAFF_CATEGORY', 'DESIGNATION']),
+        config_type: vine.enum(['STAFF_TYPE', 'STAFF_CATEGORY', 'DESIGNATION', 'EMPLOYMENT_STATUS', 'LETTER_TYPE', 'SUBJECT_SPECIALIZATION', 'QUALIFICATION']),
         name: vine.string().trim().maxLength(255),
         parent_id: vine.number().nullable().optional(),
       })

@@ -125,12 +125,23 @@ export default class LeavesController {
   }
 
   async indexLeavePolicyForSchool(ctx: HttpContext) {
-    let leave_policies = await LeavePolicies.query()
+    let query = LeavePolicies.query()
       .preload('staff_role')
       .preload('leave_type')
       .where('school_id', ctx.auth.user!.school_id!)
       .orderBy('id', 'desc')
-      .paginate(ctx.request.input('page', 1), 6)
+
+    const academic_year = ctx.request.input('academic_year')
+    if (academic_year && academic_year !== 'undefined' && academic_year !== 'null') {
+      query = query.where('academic_year', academic_year)
+    }
+
+    if (ctx.request.input('page') === 'all') {
+      const allPolicies = await query
+      return ctx.response.status(200).json(allPolicies)
+    }
+
+    let leave_policies = await query.paginate(ctx.request.input('page', 1), 10)
 
     return ctx.response.status(200).json(leave_policies)
   }
@@ -139,40 +150,33 @@ export default class LeavesController {
     let staff_id = ctx.auth.user!.staff_id
     let academic_year = ctx.request.input('academic_year')
 
-    console.log('[DEBUG indexLeavePolicyForUser]', {
-      auth_user: ctx.auth.user ? {
-        id: ctx.auth.user.id,
-        school_id: ctx.auth.user.school_id,
-        staff_id: ctx.auth.user.staff_id,
-        role_id: ctx.auth.user.role_id,
-      } : null,
-      academic_year,
-    })
-
     if (!academic_year || academic_year === 'undefined') {
-      console.log('[DEBUG indexLeavePolicyForUser] Missing or undefined academic_year')
       return ctx.response.status(200).json([])
     }
 
     if (!staff_id) {
-      console.log('[DEBUG indexLeavePolicyForUser] Staff ID is null/undefined for user:', ctx.auth.user!.id)
       return ctx.response.status(200).json([])
     }
 
     let staff = await Staff.find(staff_id)
 
     if (!staff) {
-      console.log('[DEBUG indexLeavePolicyForUser] Staff NOT found:', { staff_id })
       return ctx.response.status(200).json([])
     }
 
-    let leave_policies = await LeavePolicies.query()
+    let query = LeavePolicies.query()
       .preload('leave_type')
       .preload('staff_role')
-      .where('staff_role_id', staff.staff_role_id)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+      .where('school_id', ctx.auth.user!.school_id!)
       .andWhere('academic_year', academic_year)
-      .orderBy('id', 'desc')
+
+    if (staff.staff_role_id) {
+      query = query.where((q) => {
+        q.where('staff_role_id', staff.staff_role_id).orWhereNull('staff_role_id')
+      })
+    }
+
+    let leave_policies = await query.orderBy('id', 'desc')
 
     const leaveBalances = await this.getStaffLeaveBalances(Number(staff_id), academic_year)
 
@@ -204,7 +208,6 @@ export default class LeavesController {
     }
 
     let payload = await CreateValidatorForLeavePolicies.validate(ctx.request.body())
-
     let school_id = ctx.auth.user!.school_id || ctx.request.input('school_id')
 
     let leave_type = await LeaveTypeMaster.query()
@@ -228,7 +231,7 @@ export default class LeavesController {
 
     if (role_id !== 1 && role_id !== 2 && role_id !== 3) {
       return ctx.response.status(401).json({
-        message: 'You are not authorized to create leave type for this school',
+        message: 'You are not authorized to edit leave policy for this school',
       })
     }
 
@@ -240,22 +243,24 @@ export default class LeavesController {
       })
     }
 
-    let validate_leave = await LeaveTypeMaster.query()
-      .where('id', leave_policy!.leave_type_id)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!validate_leave) {
-      return ctx.response.status(401).json({
-        message: 'This leave policy is not available for your school',
-      })
-    }
-
     let payload = await UpdateValidatorForLeavePolicies.validate(ctx.request.body())
-
     await leave_policy.merge(payload).save()
 
     return ctx.response.status(200).json(leave_policy)
+  }
+
+  async deleteLeavePolicyForSchool(ctx: HttpContext) {
+    const policy = await LeavePolicies.query()
+      .where('id', ctx.params.leave_policy_id)
+      .andWhere('school_id', ctx.auth.user!.school_id!)
+      .first()
+
+    if (!policy) {
+      return ctx.response.status(404).json({ message: 'Leave policy not found' })
+    }
+
+    await policy.delete()
+    return ctx.response.status(200).json({ message: 'Leave policy deleted successfully' })
   }
 
   private async validateLeaveRequest(payload: any, leavePolicy: LeavePolicies) {
@@ -477,12 +482,19 @@ export default class LeavesController {
       }
 
       // Get leave policy
-      const leavePolicy = await LeavePolicies.query()
+      let policyQuery = LeavePolicies.query()
         .preload('staff_role')
-        .where('staff_role_id', staff.staff_role_id)
+        .where('school_id', school_id)
         .andWhere('leave_type_id', payload.leave_type_id)
         .andWhere('academic_year', payload.academic_year!)
-        .first()
+
+      if (staff.staff_role_id) {
+        policyQuery = policyQuery.where((q) => {
+          q.where('staff_role_id', staff.staff_role_id).orWhereNull('staff_role_id')
+        })
+      }
+
+      const leavePolicy = await policyQuery.first()
 
       if (!leavePolicy) {
         return ctx.response.status(404).json({
@@ -641,15 +653,21 @@ export default class LeavesController {
       }
 
       // Get applicable leave policy
-      let leave_policy: LeavePolicies | null = null
       const leave_type_id = payload.leave_type_id || application.leave_type_id
 
-      leave_policy = await LeavePolicies.query()
+      let policyQuery = LeavePolicies.query()
         .preload('staff_role')
-        .where('staff_role_id', staff.staff_role_id)
+        .where('school_id', ctx.auth.user!.school_id!)
         .andWhere('leave_type_id', leave_type_id)
         .andWhere('academic_year', application.academic_year)
-        .first()
+
+      if (staff.staff_role_id) {
+        policyQuery = policyQuery.where((q) => {
+          q.where('staff_role_id', staff.staff_role_id).orWhereNull('staff_role_id')
+        })
+      }
+
+      let leave_policy = await policyQuery.first()
 
       if (!leave_policy) {
         await trx.rollback()
@@ -1126,12 +1144,20 @@ export default class LeavesController {
       })
     }
 
-    // Get leave policies for this staff role
-    const leavePolicies = await LeavePolicies.query()
+    // Get leave policies for this staff member (via template or fallback to role)
+    let policyQuery = LeavePolicies.query()
       .preload('leave_type')
-      .where('staff_role_id', staff.staff_role_id)
+      .preload('leave_template')
       .andWhere('academic_year', academicYear)
       .andWhere('school_id', ctx.auth.user!.school_id!)
+
+    if (staff.leave_template_id) {
+      policyQuery = policyQuery.where('leave_template_id', staff.leave_template_id)
+    } else if (staff.staff_role_id) {
+      policyQuery = policyQuery.where('staff_role_id', staff.staff_role_id)
+    }
+
+    const leavePolicies = await policyQuery
 
     // Get all leave balances for the staff
     const leaveBalances = await this.getStaffLeaveBalances(staffId, academicYear)
@@ -1665,6 +1691,7 @@ export default class LeavesController {
       const user = ctx.auth.user!
       const school_id = user.school_id || 1
       const academic_year = ctx.request.input('academic_year')
+      const staff_type = ctx.request.input('type', 'all') // 'all' | 'teaching' | 'non-teaching' | 'hospital'
 
       // Fetch all active leave types for school
       let leaveTypesQuery = LeaveTypeMaster.query().where('school_id', school_id)
@@ -1673,11 +1700,22 @@ export default class LeavesController {
       }
       const leaveTypes = await leaveTypesQuery
 
-      // Fetch all staff for school
+      // Fetch staff for school
       let staffQuery = Staff.query()
         .where('school_id', school_id)
         .preload('department_details')
+        .preload('role_type')
         .orderBy('first_name', 'asc')
+
+      if (staff_type === 'teaching') {
+        staffQuery = staffQuery.where('is_teaching_role', true)
+      } else if (staff_type === 'hospital') {
+        staffQuery = staffQuery.where('staff_type', 'Hospital Staff')
+      } else if (staff_type === 'non-teaching') {
+        staffQuery = staffQuery.where('is_teaching_role', false).where((q) => {
+          q.whereNull('staff_type').orWhereNot('staff_type', 'Hospital Staff')
+        })
+      }
 
       const staffList = await staffQuery
 
@@ -1721,7 +1759,11 @@ export default class LeavesController {
           middle_name: st.middle_name,
           last_name: st.last_name,
           full_name: `${st.first_name} ${st.last_name}`.trim(),
-          employee_id: (st as any).employee_id || (st as any).staff_code || `ST-${st.id}`,
+          employee_id: st.employee_code || (st as any).employee_id || (st as any).staff_code || `ST-${st.id}`,
+          role: st.role_type?.role || 'Staff',
+          staff_type: st.staff_type || (st.is_teaching_role ? 'Teaching' : 'Non-Teaching'),
+          staff_category: st.staff_category || 'N/A',
+          designation: st.designation || 'N/A',
           department: typeof st.department === 'string' && st.department.trim() ? st.department : st.department_details?.name || 'N/A',
           total_leaves_taken: totalTaken,
           total_leaves_available: totalAvailable,
@@ -1733,7 +1775,7 @@ export default class LeavesController {
         leave_types: leaveTypes.map((lt) => ({ id: lt.id, name: lt.leave_type_name })),
         data: summary,
       })
-    } catch (error) {
+    } catch (error: any) {
       return ctx.response.status(500).json({ message: 'Failed to generate leave summary report', error: error.message })
     }
   }

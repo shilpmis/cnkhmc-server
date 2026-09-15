@@ -92,8 +92,10 @@ export const CreateValidatorForPeriodConfig = vine.compile(
         subjects_division_masters_id: vine.number().nullable().optional(),
         staff_enrollment_id: vine.number().nullable().optional(),
         lab_id: vine.number().nullable().optional(),
-        is_pt: vine.boolean(),
+        is_pt: vine.boolean().optional(),
         is_free_period: vine.boolean(),
+        is_library: vine.boolean().optional(),
+        is_seminar: vine.boolean().optional(),
         batch_name: vine.string().nullable().optional(),
       })
     )
@@ -116,6 +118,8 @@ export const UpdateValidatorForPeriodConfig = vine.compile(
         lab_id: vine.number().nullable().optional(), 
         is_pt: vine.boolean().optional(),
         is_free_period: vine.boolean().optional(),
+        is_library: vine.boolean().optional(),
+        is_seminar: vine.boolean().optional(),
         batch_name: vine.string().nullable().optional(),
       })
     )
@@ -134,8 +138,10 @@ export const ValidatorForCheckPeriodConfig = vine.compile(
     subjects_division_masters_id: vine.number().nullable(),
     staff_enrollment_id: vine.number().nullable(),
     lab_id: vine.number().nullable(),
-    is_pt: vine.boolean(),
+    is_pt: vine.boolean().optional(),
     is_free_period: vine.boolean(),
+    is_library: vine.boolean().optional(),
+    is_seminar: vine.boolean().optional(),
     batch_name: vine.string().nullable().optional(),
   })
 )
@@ -158,6 +164,8 @@ export const UpdateValidatorForPeriodConfigWeek = vine.compile(
             lab_id: vine.number().nullable().optional(), 
             is_pt: vine.boolean().optional(),
             is_free_period: vine.boolean().optional(),
+            is_library: vine.boolean().optional(),
+            is_seminar: vine.boolean().optional(),
             batch_name: vine.string().nullable().optional(),
           })
         )

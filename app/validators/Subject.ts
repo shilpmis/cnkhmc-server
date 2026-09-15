@@ -6,6 +6,7 @@ import vine from "@vinejs/vine";
 export const CreateValidatorForSubject = vine.compile(
   vine.object({
     name: vine.string().trim().minLength(1).maxLength(255),
+    code: vine.string().trim().maxLength(50).optional().nullable(),
     description: vine.string().trim().maxLength(255).optional().nullable(),
     academic_year: vine.number().optional(),
     academic_session_id: vine.number().optional(),
@@ -19,8 +20,13 @@ export const CreateValidatorForSubject = vine.compile(
  */
 export const UpdateValidatorForSubject = vine.compile(
   vine.object({
-    description: vine.string().trim().maxLength(255).optional(),
-    status : vine.enum(['Active', 'Inactive']).optional(),
+    name: vine.string().trim().minLength(1).maxLength(255).optional(),
+    code: vine.string().trim().maxLength(50).optional().nullable(),
+    description: vine.string().trim().maxLength(255).optional().nullable(),
+    academic_year: vine.number().optional(),
+    academic_session_id: vine.number().optional(),
+    year: vine.string().trim().maxLength(50).optional().nullable(),
+    status: vine.enum(['Active', 'Inactive']).optional(),
   })
 )
 
