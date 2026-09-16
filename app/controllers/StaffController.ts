@@ -434,6 +434,8 @@ export default class StaffController {
         university_approval_date,
         bank_branch_name,
         experience_years,
+        leave_policy_ids,
+        letters,
         ...staffPayload
       } = payload
 
@@ -572,6 +574,8 @@ export default class StaffController {
         university_approval_date,
         bank_branch_name,
         experience_years,
+        leave_policy_ids,
+        letters,
         ...staffPayload
       } = payload
 
