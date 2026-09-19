@@ -199,6 +199,7 @@ router
         router.get('leave-type', [LeavesController, 'indexLeaveTypesForSchool'])
         router.post('leave-type', [LeavesController, 'createLeaveTypeForSchool'])
         router.put('leave-type/:leave_type_id', [LeavesController, 'updateLeaveTypeForSchool'])
+        router.delete('leave-type/:leave_type_id', [LeavesController, 'deleteLeaveTypeForSchool'])
         router.get('leave-policy', [LeavesController, 'indexLeavePolicyForSchool'])
         router.get('leave-policy/user', [LeavesController, 'indexLeavePolicyForUser'])
         router.post('leave-policy', [LeavesController, 'createLeavePolicyForSchool'])

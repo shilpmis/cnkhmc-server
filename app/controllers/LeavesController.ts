@@ -263,6 +263,22 @@ export default class LeavesController {
     return ctx.response.status(200).json({ message: 'Leave policy deleted successfully' })
   }
 
+  async deleteLeaveTypeForSchool(ctx: HttpContext) {
+    const leaveType = await LeaveTypeMaster.query()
+      .where('id', ctx.params.leave_type_id)
+      .andWhere('school_id', ctx.auth.user!.school_id!)
+      .first()
+
+    if (!leaveType) {
+      return ctx.response.status(404).json({ message: 'Leave type not found' })
+    }
+
+    // Delete associated leave policies first to maintain data integrity
+    await LeavePolicies.query().where('leave_type_id', leaveType.id).delete()
+    await leaveType.delete()
+    return ctx.response.status(200).json({ message: 'Leave type deleted successfully' })
+  }
+
   private async validateLeaveRequest(payload: any, leavePolicy: LeavePolicies) {
     let numberOfDays = 0
 
