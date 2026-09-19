@@ -177,7 +177,27 @@ export default class StaffController {
         return ctx.response.notFound({ message: 'Staff not found' });
       }
 
-      return ctx.response.ok(staff);
+      // Also find active leave balances to extract leave_policy_ids
+      const leaveBalances = await StaffLeaveBalance.query().where('staff_id', staffId)
+      const leaveTypeIds = leaveBalances.map((b) => b.leave_type_id)
+      let leavePolicyIds: number[] = []
+      if (leaveTypeIds.length > 0) {
+        const matchingPolicies = await LeavePolicies.query()
+          .where('school_id', school_id)
+          .whereIn('leave_type_id', leaveTypeIds)
+        leavePolicyIds = matchingPolicies.map((p) => p.id)
+      }
+
+      const staffJSON: any = staff.toJSON()
+      staffJSON.leave_policy_ids = leavePolicyIds
+      staffJSON.bank_branch_name = staff.branch_details
+      staffJSON.date_of_registration = staff.registration_date
+      staffJSON.university_approval_letter_no = staff.uni_approval_number
+      staffJSON.university_approval_date = staff.uni_approval_date
+      staffJSON.teacher_code = staff.ayush_teacher_code
+      staffJSON.ayush_registration_no = staff.registration_number
+
+      return ctx.response.ok(staffJSON);
     } catch (error) {
       console.error('Error fetching staff:', error);
       return ctx.response.internalServerError({ message: 'Internal server error' });
@@ -439,16 +459,20 @@ export default class StaffController {
         ...staffPayload
       } = payload
 
+      const approvalLetterInArray = letters?.find((l: any) => l.letter_type?.toLowerCase().includes('approval'))
+      const effectiveUniNo = university_approval_letter_no || approvalLetterInArray?.letter_no || null
+      const effectiveUniDate = university_approval_date || (approvalLetterInArray?.letter_date ? new Date(approvalLetterInArray.letter_date) : null)
+
       // Create staff within the transaction
       const staff = await Staff.create(
         {
           ...(staffPayload as any),
-          ayush_teacher_code: teacher_code,
-          registration_number: ayush_registration_no,
-          registration_date: date_of_registration,
-          uni_approval_number: university_approval_letter_no,
-          uni_approval_date: university_approval_date,
-          branch_details: bank_branch_name,
+          ayush_teacher_code: teacher_code || null,
+          registration_number: ayush_registration_no || null,
+          registration_date: date_of_registration ? new Date(date_of_registration) : null,
+          uni_approval_number: effectiveUniNo,
+          uni_approval_date: effectiveUniDate,
+          branch_details: bank_branch_name || null,
           school_id: school_id as number,
           is_teching_staff: role.is_teaching_role,
           is_teaching_role: role.is_teaching_role,
@@ -579,16 +603,41 @@ export default class StaffController {
         ...staffPayload
       } = payload
 
+      const approvalLetterInArray = letters?.find((l: any) => l.letter_type?.toLowerCase().includes('approval'))
+      const effectiveUniNo = university_approval_letter_no !== undefined 
+        ? university_approval_letter_no 
+        : (approvalLetterInArray?.letter_no ?? staff.uni_approval_number)
+      
+      const effectiveUniDate = university_approval_date !== undefined
+        ? (university_approval_date ? new Date(university_approval_date) : null)
+        : (approvalLetterInArray?.letter_date ? new Date(approvalLetterInArray.letter_date) : staff.uni_approval_date)
+
+      const effectiveRegDate = date_of_registration !== undefined 
+        ? (date_of_registration ? new Date(date_of_registration) : null)
+        : ((staffPayload as any).registration_date !== undefined ? (staffPayload as any).registration_date : staff.registration_date)
+
+      const effectiveBranch = bank_branch_name !== undefined 
+        ? bank_branch_name 
+        : ((staffPayload as any).branch_details !== undefined ? (staffPayload as any).branch_details : staff.branch_details)
+
+      const effectiveRegNo = ayush_registration_no !== undefined
+        ? ayush_registration_no
+        : ((staffPayload as any).registration_number !== undefined ? (staffPayload as any).registration_number : staff.registration_number)
+
+      const effectiveTeacherCode = teacher_code !== undefined
+        ? teacher_code
+        : ((staffPayload as any).ayush_teacher_code !== undefined ? (staffPayload as any).ayush_teacher_code : staff.ayush_teacher_code)
+
       const isResigned = staffPayload.employment_status === 'Resigned' || !!payload.resignation_date
       staff.useTransaction(trx)
       await staff.merge({
         ...(staffPayload as any),
-        ayush_teacher_code: teacher_code !== undefined ? teacher_code : staff.ayush_teacher_code,
-        registration_number: ayush_registration_no !== undefined ? ayush_registration_no : staff.registration_number,
-        registration_date: date_of_registration !== undefined ? date_of_registration : staff.registration_date,
-        uni_approval_number: university_approval_letter_no !== undefined ? university_approval_letter_no : staff.uni_approval_number,
-        uni_approval_date: university_approval_date !== undefined ? university_approval_date : staff.uni_approval_date,
-        branch_details: bank_branch_name !== undefined ? bank_branch_name : staff.branch_details,
+        ayush_teacher_code: effectiveTeacherCode,
+        registration_number: effectiveRegNo,
+        registration_date: effectiveRegDate,
+        uni_approval_number: effectiveUniNo,
+        uni_approval_date: effectiveUniDate,
+        branch_details: effectiveBranch,
         total_experience: experience_years !== undefined ? experience_years : staff.total_experience,
         is_active: isResigned ? false : true,
       }).save()
@@ -601,7 +650,7 @@ export default class StaffController {
         }
       }
 
-      if (payload.leave_policy_ids && Array.isArray(payload.leave_policy_ids)) {
+      if (payload.leave_policy_ids !== undefined && Array.isArray(payload.leave_policy_ids)) {
         const academic_session_id =
           ctx.request.input('academic_sessions') ||
           ctx.request.input('academic_session_id') ||
@@ -611,12 +660,12 @@ export default class StaffController {
         if (academic_session_id) {
           const selectedPolicies = await LeavePolicies.query({ client: trx })
             .where('school_id', school_id)
-            .andWhere('academic_year', academic_session_id)
             .whereIn('id', payload.leave_policy_ids)
+
+          const selectedLeaveTypeIds = new Set(selectedPolicies.map((p) => p.leave_type_id))
 
           const existingBalances = await StaffLeaveBalance.query({ client: trx })
             .where('staff_id', staff.id)
-            .andWhere('academic_year', academic_session_id)
 
           const existingLeaveTypeIds = new Set(existingBalances.map((b) => b.leave_type_id))
 
@@ -626,7 +675,7 @@ export default class StaffController {
                 {
                   staff_id: staff.id,
                   leave_type_id: policy.leave_type_id,
-                  academic_year: academic_session_id as number,
+                  academic_year: (policy.academic_year || academic_session_id) as number,
                   total_leaves: policy.annual_quota,
                   used_leaves: 0,
                   pending_leaves: 0,
@@ -635,6 +684,13 @@ export default class StaffController {
                 },
                 { client: trx }
               )
+            }
+          }
+
+          // If a policy was unchecked, remove balances that have 0 used leaves
+          for (const bal of existingBalances) {
+            if (!selectedLeaveTypeIds.has(bal.leave_type_id) && bal.used_leaves === 0 && bal.pending_leaves === 0) {
+              await bal.useTransaction(trx).delete()
             }
           }
         }

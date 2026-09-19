@@ -120,6 +120,7 @@ router
     router.get('/users', [UsersController, 'indexSchoolUsers'])
     router.post('/user', [UsersController, 'createUser'])
     router.put('/user/:user_id', [UsersController, 'updateUser'])
+    router.delete('/user/:user_id', [UsersController, 'deleteUser'])
     router.post('/user/onboard/staff', [UsersController, 'onBoardStaffAsUser'])
     router.put('/user/onboard/staff/:user_id', [UsersController, 'UpdateOnBoardedStaff'])
 

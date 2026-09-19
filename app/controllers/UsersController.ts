@@ -292,4 +292,98 @@ export default class UsersController {
       })
     }
   }
+
+  async deleteUser(ctx: HttpContext) {
+    const user_id = ctx.params.user_id
+    const currentUserId = ctx.auth.user?.id
+    const currentUserRoleId = Number(ctx.auth.user?.role_id)
+    const schoolId = ctx.auth.user?.school_id
+
+    // Authorization check (Admin, Principal, IT Admin, Super Admin, Developer)
+    if (![1, 2, 5, 8, 11].includes(currentUserRoleId)) {
+      return ctx.response.status(401).json({
+        message: 'You are not authorized to perform this action',
+      })
+    }
+
+    if (Number(user_id) === Number(currentUserId)) {
+      return ctx.response.status(400).json({
+        message: 'You cannot delete your own account',
+      })
+    }
+
+    const user = await User.query()
+      .where('id', user_id)
+      .andWhere('school_id', schoolId as number)
+      .first()
+
+    if (!user) {
+      return ctx.response.status(404).json({ message: 'User not found' })
+    }
+
+    const trx = await db.transaction()
+
+    try {
+      // 1. If user is linked to staff, clean up staff-specific class teacher allocations
+      if (user.staff_id) {
+        await db
+          .from('class_teacher_masters')
+          .useTransaction(trx)
+          .where('staff_id', user.staff_id)
+          .delete()
+      }
+
+      // 2. Clean up foreign keys referencing user_id
+      await db
+        .from('auth_access_tokens')
+        .useTransaction(trx)
+        .where('tokenable_id', user.id)
+        .delete()
+
+      await db
+        .from('user_policies')
+        .useTransaction(trx)
+        .where('user_id', user.id)
+        .delete()
+
+      await db
+        .from('chat_room_members')
+        .useTransaction(trx)
+        .where('user_id', user.id)
+        .delete()
+
+      await db
+        .from('chat_messages')
+        .useTransaction(trx)
+        .where('sender_id', user.id)
+        .delete()
+
+      await db
+        .from('staff_attendance_edit_requests')
+        .useTransaction(trx)
+        .where('requested_by', user.id)
+        .orWhere('actioned_by', user.id)
+        .delete()
+
+      await db
+        .from('leave_logs')
+        .useTransaction(trx)
+        .where('performed_by', user.id)
+        .delete()
+
+      // 3. Delete the user
+      user.useTransaction(trx)
+      await user.delete()
+
+      await trx.commit()
+      return ctx.response.ok({ message: 'User deleted successfully' })
+    } catch (error: any) {
+      await trx.rollback()
+      console.error('Error deleting user:', error)
+      return ctx.response.status(500).json({
+        message: error.message || 'Failed to delete user',
+      })
+    }
+  }
 }
+
