@@ -1879,28 +1879,47 @@ export default class LeavesController {
           let available = 0
           let pending = 0
 
+          const matchingPolicies = allPolicies.filter((p) => p.leave_type_id === lt.id)
+          const isApplicable = matchingPolicies.length === 0 || matchingPolicies.some((p) => this.isPolicyApplicableToStaff(p, st))
+
           if (bal) {
-            total = Number(bal.total_leaves) || 0
-            pending = Number(bal.pending_leaves) || 0
             const dbUsed = Number(bal.used_leaves) || 0
             used = Math.max(dbUsed, actualApproved)
-            available = Number(bal.available_balance)
-            if (available <= 0 && used < total) {
-              available = Math.max(0, this.formatDecimalValue(total - used - pending))
+            if (isApplicable) {
+              total = Number(bal.total_leaves) || 0
+              pending = Number(bal.pending_leaves) || 0
+              available = Number(bal.available_balance)
+              if (available <= 0 && used < total) {
+                available = Math.max(0, this.formatDecimalValue(total - used - pending))
+              }
+            } else {
+              // Obsolete/mismatched leave balance for this staff member
+              total = used
+              available = 0
             }
-          } else {
-            // Only match policy if it explicitly matches st.leave_template_id or st.staff_role_id
-            const matchingPolicies = allPolicies.filter((p) => p.leave_type_id === lt.id)
+          } else if (isApplicable) {
+            // Only match policy if it explicitly matches st.leave_template_id or st.staff_role_id or st.staff_type
             let policy = matchingPolicies.find((p) => st.leave_template_id && p.leave_template_id === st.leave_template_id)
             if (!policy && st.staff_role_id) {
               policy = matchingPolicies.find((p) => p.staff_role_id === st.staff_role_id)
+            }
+            if (!policy) {
+              policy = matchingPolicies.find((p) => this.isPolicyApplicableToStaff(p, st))
             }
 
             if (policy) {
               used = actualApproved
               total = Number(policy.annual_quota) || 0
               available = Math.max(0, total - used)
+            } else if (actualApproved > 0) {
+              used = actualApproved
+              total = used
+              available = 0
             }
+          } else if (actualApproved > 0) {
+            used = actualApproved
+            total = used
+            available = 0
           }
 
           totalTaken += used
@@ -1998,8 +2017,16 @@ export default class LeavesController {
         }
       })
 
+      const allSchoolPolicies = await LeavePolicies.query().where('school_id', staff.school_id)
       const policyLeaveTypeIds = new Set(leavePolicies.map((p) => p.leave_type_id))
-      const extraBalances = existingBalances.filter((b) => !policyLeaveTypeIds.has(b.leave_type_id))
+      const extraBalances = existingBalances.filter((b) => {
+        if (policyLeaveTypeIds.has(b.leave_type_id)) return false
+        const matchingPolicy = allSchoolPolicies.find((p) => p.leave_type_id === b.leave_type_id)
+        if (matchingPolicy && !this.isPolicyApplicableToStaff(matchingPolicy, staff) && Number(b.used_leaves) === 0) {
+          return false
+        }
+        return true
+      })
       const finalBalances = [...combinedBalances, ...extraBalances]
 
       // Fetch applications
@@ -2032,6 +2059,43 @@ export default class LeavesController {
     } catch (error: any) {
       return ctx.response.status(500).json({ message: 'Failed to fetch individual leave report', error: error.message })
     }
+  }
+
+  isPolicyApplicableToStaff(
+    policy: { applicable_staff_type?: string | null } | null | undefined,
+    staff: { staff_type?: string | null; is_teaching_role?: boolean }
+  ): boolean {
+    if (!policy || !policy.applicable_staff_type) return true // Global policy applies to all
+
+    const staffTypeLower = (staff.staff_type || (staff.is_teaching_role ? 'teaching' : 'non-teaching')).toLowerCase()
+    const policyAppTypeLower = (policy.applicable_staff_type || '').toLowerCase()
+
+    // Hospital staff
+    if (staffTypeLower.includes('hospital')) {
+      return policyAppTypeLower.includes('hospital')
+    }
+
+    // Non-teaching staff
+    if (staffTypeLower.includes('non-teaching') || staffTypeLower.includes('non teaching')) {
+      return policyAppTypeLower.includes('non-teaching') || policyAppTypeLower.includes('non teaching')
+    }
+
+    // Teaching staff
+    if (staffTypeLower.includes('teaching')) {
+      if (policyAppTypeLower.includes('hospital') || policyAppTypeLower.includes('non-teaching') || policyAppTypeLower.includes('non teaching')) {
+        return false
+      }
+      const isStaffNonVacational = staffTypeLower.includes('non vact') || staffTypeLower.includes('non-vact') || staffTypeLower.includes('non vacat')
+      const isPolicyNonVacational = policyAppTypeLower.includes('non vact') || policyAppTypeLower.includes('non-vact') || policyAppTypeLower.includes('non vacat')
+      const isStaffVacational = !isStaffNonVacational && (staffTypeLower.includes('vact') || staffTypeLower.includes('vacat'))
+      const isPolicyVacational = !isPolicyNonVacational && (policyAppTypeLower.includes('vact') || policyAppTypeLower.includes('vacat'))
+
+      if (isStaffNonVacational) return isPolicyNonVacational
+      if (isStaffVacational) return isPolicyVacational
+      return true
+    }
+
+    return policyAppTypeLower === staffTypeLower
   }
 }
 

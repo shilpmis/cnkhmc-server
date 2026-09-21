@@ -185,7 +185,9 @@ export default class StaffController {
         const matchingPolicies = await LeavePolicies.query()
           .where('school_id', school_id)
           .whereIn('leave_type_id', leaveTypeIds)
-        leavePolicyIds = matchingPolicies.map((p) => p.id)
+        leavePolicyIds = matchingPolicies
+          .filter((p) => this.isPolicyApplicableToStaff(p, staff))
+          .map((p) => p.id)
       }
 
       const staffJSON: any = staff.toJSON()
@@ -464,6 +466,12 @@ export default class StaffController {
       const effectiveUniDate = university_approval_date || (approvalLetterInArray?.letter_date ? new Date(approvalLetterInArray.letter_date) : null)
 
       // Create staff within the transaction
+      let isTeachingRole = role.is_teaching_role
+      if (staffPayload.staff_type) {
+        const stType = String(staffPayload.staff_type).toLowerCase()
+        isTeachingRole = stType.includes('teaching') && !stType.includes('non-teaching')
+      }
+
       const staff = await Staff.create(
         {
           ...(staffPayload as any),
@@ -474,8 +482,8 @@ export default class StaffController {
           uni_approval_date: effectiveUniDate,
           branch_details: bank_branch_name || null,
           school_id: school_id as number,
-          is_teching_staff: role.is_teaching_role,
-          is_teaching_role: role.is_teaching_role,
+          is_teching_staff: isTeachingRole,
+          is_teaching_role: isTeachingRole,
           is_active: (staffPayload.employment_status === 'Resigned' || !!payload.resignation_date) ? false : true,
           employee_code: 'EMP' + Math.floor(1000 + Math.random() * 9000),
           short_name: `${staffPayload.first_name} ${staffPayload.last_name}`,
@@ -506,7 +514,8 @@ export default class StaffController {
         policiesQuery = policiesQuery.whereIn('id', payload.leave_policy_ids)
       }
 
-      const policies = await policiesQuery
+      let policies = await policiesQuery
+      policies = policies.filter((p) => this.isPolicyApplicableToStaff(p, staff))
 
       for (const policy of policies) {
         await StaffLeaveBalance.create(
@@ -629,9 +638,16 @@ export default class StaffController {
         : ((staffPayload as any).ayush_teacher_code !== undefined ? (staffPayload as any).ayush_teacher_code : staff.ayush_teacher_code)
 
       const isResigned = staffPayload.employment_status === 'Resigned' || !!payload.resignation_date
+      let isTeachingRole = (staffPayload as any).is_teaching_role
+      if (staffPayload.staff_type !== undefined && staffPayload.staff_type !== null) {
+        const stType = String(staffPayload.staff_type).toLowerCase()
+        isTeachingRole = stType.includes('teaching') && !stType.includes('non-teaching')
+      }
+
       staff.useTransaction(trx)
       await staff.merge({
         ...(staffPayload as any),
+        ...(isTeachingRole !== undefined ? { is_teaching_role: isTeachingRole, is_teching_staff: isTeachingRole } : {}),
         ayush_teacher_code: effectiveTeacherCode,
         registration_number: effectiveRegNo,
         registration_date: effectiveRegDate,
@@ -658,9 +674,12 @@ export default class StaffController {
           (ctx.session ? ctx.session.get('academic_session_id') : null) ||
           new Date().getFullYear()
         if (academic_session_id) {
-          const selectedPolicies = await LeavePolicies.query({ client: trx })
+          let selectedPolicies = await LeavePolicies.query({ client: trx })
             .where('school_id', school_id)
             .whereIn('id', payload.leave_policy_ids)
+
+          // Ensure only policies applicable to this staff member's staff_type are kept
+          selectedPolicies = selectedPolicies.filter((p) => this.isPolicyApplicableToStaff(p, staff))
 
           const selectedLeaveTypeIds = new Set(selectedPolicies.map((p) => p.leave_type_id))
 
@@ -687,11 +706,21 @@ export default class StaffController {
             }
           }
 
-          // If a policy was unchecked, remove balances that have 0 used leaves
+          // If a policy was unchecked or does not match staff_type, remove balances that have 0 used leaves and 0 pending leaves
           for (const bal of existingBalances) {
-            if (!selectedLeaveTypeIds.has(bal.leave_type_id) && bal.used_leaves === 0 && bal.pending_leaves === 0) {
+            if (!selectedLeaveTypeIds.has(bal.leave_type_id) && Number(bal.used_leaves) === 0 && Number(bal.pending_leaves) === 0) {
               await bal.useTransaction(trx).delete()
             }
+          }
+        }
+      } else if (staffPayload.staff_type !== undefined) {
+        // Staff type was updated without explicit leave_policy_ids
+        const allPolicies = await LeavePolicies.query({ client: trx }).where('school_id', school_id)
+        const existingBalances = await StaffLeaveBalance.query({ client: trx }).where('staff_id', staff.id)
+        for (const bal of existingBalances) {
+          const policy = allPolicies.find((p) => p.leave_type_id === bal.leave_type_id)
+          if (policy && !this.isPolicyApplicableToStaff(policy, staff) && Number(bal.used_leaves) === 0 && Number(bal.pending_leaves) === 0) {
+            await bal.useTransaction(trx).delete()
           }
         }
       }
@@ -1558,5 +1587,42 @@ export default class StaffController {
         message: error.message
       })
     }
+  }
+
+  isPolicyApplicableToStaff(
+    policy: { applicable_staff_type?: string | null } | null | undefined,
+    staff: { staff_type?: string | null; is_teaching_role?: boolean }
+  ): boolean {
+    if (!policy || !policy.applicable_staff_type) return true // Global policy applies to all
+
+    const staffTypeLower = (staff.staff_type || (staff.is_teaching_role ? 'teaching' : 'non-teaching')).toLowerCase()
+    const policyAppTypeLower = (policy.applicable_staff_type || '').toLowerCase()
+
+    // Hospital staff
+    if (staffTypeLower.includes('hospital')) {
+      return policyAppTypeLower.includes('hospital')
+    }
+
+    // Non-teaching staff
+    if (staffTypeLower.includes('non-teaching') || staffTypeLower.includes('non teaching')) {
+      return policyAppTypeLower.includes('non-teaching') || policyAppTypeLower.includes('non teaching')
+    }
+
+    // Teaching staff
+    if (staffTypeLower.includes('teaching')) {
+      if (policyAppTypeLower.includes('hospital') || policyAppTypeLower.includes('non-teaching') || policyAppTypeLower.includes('non teaching')) {
+        return false
+      }
+      const isStaffNonVacational = staffTypeLower.includes('non vact') || staffTypeLower.includes('non-vact') || staffTypeLower.includes('non vacat')
+      const isPolicyNonVacational = policyAppTypeLower.includes('non vact') || policyAppTypeLower.includes('non-vact') || policyAppTypeLower.includes('non vacat')
+      const isStaffVacational = !isStaffNonVacational && (staffTypeLower.includes('vact') || staffTypeLower.includes('vacat'))
+      const isPolicyVacational = !isPolicyNonVacational && (policyAppTypeLower.includes('vact') || policyAppTypeLower.includes('vacat'))
+
+      if (isStaffNonVacational) return isPolicyNonVacational
+      if (isStaffVacational) return isPolicyVacational
+      return true
+    }
+
+    return policyAppTypeLower === staffTypeLower
   }
 }
