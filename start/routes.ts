@@ -241,6 +241,15 @@ router
         // Leave Report routes
         router.get('leave-reports/summary', [LeavesController, 'fetchTeachersLeaveSummaryReport'])
         router.get('leave-reports/individual/:staff_id', [LeavesController, 'fetchIndividualTeacherLeaveReport'])
+
+        // Leave Approval Hierarchy routes
+        router.get('leaves/hierarchy/rules', [LeavesController, 'indexApprovalHierarchy'])
+        router.post('leaves/hierarchy/rules', [LeavesController, 'createOrUpdateHierarchyRule'])
+        router.delete('leaves/hierarchy/rules/:id', [LeavesController, 'deleteHierarchyRule'])
+        router.get('leaves/hierarchy/staff-mappings', [LeavesController, 'indexStaffHierarchyMappings'])
+        router.put('leaves/hierarchy/staff-mappings', [LeavesController, 'updateStaffApprover'])
+        router.post('leaves/hierarchy/bulk-assign', [LeavesController, 'bulkAssignApprover'])
+        router.get('leaves/hierarchy/eligible-approvers', [LeavesController, 'getEligibleApprovers'])
       })
       .use(middleware.auth())
 
