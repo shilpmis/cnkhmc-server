@@ -4,6 +4,8 @@ import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Schools from './Schools.js'
 
 export default class CertificateTemplate extends BaseModel {
+  public static table = 'certificate_templates'
+
   @column({ isPrimary: true })
   declare id: number
 
@@ -11,18 +13,29 @@ export default class CertificateTemplate extends BaseModel {
   declare name: string
 
   @column()
+  declare code: string | null
+
+  @column()
   declare type: string
+
+  @column({ columnName: 'target_type' })
+  declare targetType: string
+
+  @column()
+  declare description: string | null
 
   @column()
   declare content: string
 
-  @column()
-  declare schoolId: number
+  @column({ columnName: 'school_id' })
+  declare schoolId: number | null
 
-  @column()
+  @column({ columnName: 'is_active' })
   declare isActive: boolean
 
-  @belongsTo(() => Schools)
+  @belongsTo(() => Schools, {
+    foreignKey: 'schoolId',
+  })
   declare school: BelongsTo<typeof Schools>
 
   @column.dateTime({ autoCreate: true })

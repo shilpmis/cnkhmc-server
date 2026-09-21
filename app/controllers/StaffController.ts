@@ -166,6 +166,7 @@ export default class StaffController {
         .preload('role_type')  // Load staff role details
         .preload('letters')
         .preload('experiences')
+        .preload('department_details')
         .preload('assigend_classes', (query) => {
           return query.preload('divisions', (divisionQuery) => {
             divisionQuery.preload('class')
@@ -192,6 +193,9 @@ export default class StaffController {
       }
 
       const staffJSON: any = staff.toJSON()
+      if (staff.department_details) {
+        staffJSON.department = staff.department_details.name
+      }
       staffJSON.leave_policy_ids = leavePolicyIds
       staffJSON.bank_branch_name = staff.branch_details
       staffJSON.date_of_registration = staff.registration_date

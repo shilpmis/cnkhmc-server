@@ -2,81 +2,177 @@ import type { HttpContext } from '@adonisjs/core/http'
 import CertificateTemplate from '#models/certificate_template'
 
 export default class CertificateTemplatesController {
-  async index({ request, response }: HttpContext) {
+  /**
+   * List certificate templates with optional target_type ('staff' | 'student') and school_id filter
+   */
+  async index({ request, response, auth }: HttpContext) {
     try {
-      const schoolId = request.input('school_id')
-      let query = CertificateTemplate.query().where('is_active', true)
-      
-      if (schoolId) {
-        query = query.where('school_id', schoolId)
+      const schoolId = request.input('school_id') || auth?.user?.school_id
+      const targetType = request.input('target_type')
+      const includeInactive = request.input('include_inactive', false)
+
+      let query = CertificateTemplate.query()
+
+      if (!includeInactive) {
+        query = query.where('is_active', true)
       }
-      
+
+      if (targetType) {
+        query = query.where('target_type', targetType)
+      }
+
+      if (schoolId) {
+        query = query.where((q) => {
+          q.where('school_id', schoolId).orWhereNull('school_id')
+        })
+      }
+
       const templates = await query.orderBy('created_at', 'desc')
       return response.status(200).json({ success: true, data: templates })
-    } catch (error) {
+    } catch (error: any) {
       return response.status(500).json({ success: false, message: 'Failed to fetch templates', error: error.message })
     }
   }
 
-  async store({ request, response }: HttpContext) {
+  /**
+   * Create a new certificate template
+   */
+  async store({ request, response, auth }: HttpContext) {
     try {
-      const data = request.only(['name', 'type', 'content', 'schoolId', 'isActive'])
-      const template = await CertificateTemplate.create(data)
-      return response.status(201).json({ success: true, message: 'Template created successfully', data: template })
-    } catch (error) {
-      return response.status(500).json({ success: false, message: 'Failed to create template', error: error.message })
+      const body = { ...request.all(), ...request.body() }
+      const {
+        name,
+        code,
+        type,
+        target_type = 'staff',
+        targetType,
+        description,
+        content,
+        school_id,
+        schoolId,
+        is_active = true,
+        isActive,
+      } = body
+
+      if (!name || !content) {
+        return response.badRequest({
+          success: false,
+          message: 'Template name and content are required',
+        })
+      }
+
+      const finalSchoolId = school_id || schoolId || auth?.user?.school_id || null
+      const finalTargetType = target_type || targetType || 'staff'
+      const finalCode = code || name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_')
+      const finalType = type || finalCode
+      const finalIsActive = isActive !== undefined ? isActive : is_active
+
+      const template = await CertificateTemplate.create({
+        name,
+        code: finalCode,
+        type: finalType,
+        targetType: finalTargetType,
+        description: description || null,
+        content,
+        schoolId: finalSchoolId,
+        isActive: finalIsActive,
+      })
+
+      return response.status(201).json({
+        success: true,
+        message: 'Certificate template created successfully',
+        data: template,
+      })
+    } catch (error: any) {
+      console.error('Error creating template:', error)
+      return response.status(500).json({
+        success: false,
+        message: 'Failed to create template: ' + error.message,
+        error: error.message,
+      })
     }
   }
 
+  /**
+   * Get single certificate template by ID
+   */
   async show({ params, response }: HttpContext) {
     try {
       const template = await CertificateTemplate.findOrFail(params.id)
       return response.status(200).json({ success: true, data: template })
-    } catch (error) {
+    } catch (error: any) {
       return response.status(404).json({ success: false, message: 'Template not found', error: error.message })
     }
   }
 
+  /**
+   * Update certificate template
+   */
   async update({ params, request, response }: HttpContext) {
     try {
       const template = await CertificateTemplate.findOrFail(params.id)
-      const data = request.only(['name', 'type', 'content', 'schoolId', 'isActive'])
-      
-      template.merge(data)
+      const body = { ...request.all(), ...request.body() }
+
+      if (body.name !== undefined) template.name = body.name
+      if (body.code !== undefined) template.code = body.code
+      if (body.type !== undefined) template.type = body.type
+      if (body.target_type !== undefined) template.targetType = body.target_type
+      if (body.targetType !== undefined) template.targetType = body.targetType
+      if (body.description !== undefined) template.description = body.description
+      if (body.content !== undefined) template.content = body.content
+      if (body.school_id !== undefined) template.schoolId = body.school_id
+      if (body.schoolId !== undefined) template.schoolId = body.schoolId
+      if (body.is_active !== undefined) template.isActive = body.is_active
+      if (body.isActive !== undefined) template.isActive = body.isActive
+
       await template.save()
-      
-      return response.status(200).json({ success: true, message: 'Template updated successfully', data: template })
-    } catch (error) {
-      return response.status(500).json({ success: false, message: 'Failed to update template', error: error.message })
+
+      return response.status(200).json({
+        success: true,
+        message: 'Certificate template updated successfully',
+        data: template,
+      })
+    } catch (error: any) {
+      console.error('Error updating template:', error)
+      return response.status(500).json({
+        success: false,
+        message: 'Failed to update template: ' + error.message,
+        error: error.message,
+      })
     }
   }
 
+  /**
+   * Delete certificate template
+   */
   async destroy({ params, response }: HttpContext) {
     try {
       const template = await CertificateTemplate.findOrFail(params.id)
       template.isActive = false // Soft delete
       await template.save()
-      
+
       return response.status(200).json({ success: true, message: 'Template deleted successfully' })
-    } catch (error) {
+    } catch (error: any) {
       return response.status(500).json({ success: false, message: 'Failed to delete template', error: error.message })
     }
   }
 
+  /**
+   * Generate student certificate
+   */
   async generate({ params, request, response }: HttpContext) {
     try {
       const { student_id } = params
       const purpose = request.input('purpose') || ''
       const examPassed = request.input('exam_passed') || ''
-      
-      // Import the models here to avoid circular dependency issues at the top level if any
+
       const { default: Students } = await import('#models/Students')
       const { default: Schools } = await import('#models/Schools')
       const { default: StudentEnrollments } = await import('#models/StudentEnrollments')
-      
+
       const student = await Students.findOrFail(student_id)
       const school = await Schools.findOrFail(student.school_id)
-      
+
       const latestEnrollment = await StudentEnrollments.query()
         .where('student_id', student.id)
         .preload('division', (dQuery) => {
@@ -84,12 +180,12 @@ export default class CertificateTemplatesController {
         })
         .orderBy('created_at', 'desc')
         .first()
-        
+
       let academicSessionName = ''
       if (latestEnrollment && latestEnrollment.academic_year) {
         academicSessionName = String(latestEnrollment.academic_year)
       }
-      
+
       const programme = latestEnrollment?.division?.class?.class || ''
       const dob = student.birth_date ? new Date(student.birth_date).toLocaleDateString('en-IN') : ''
       const currentDate = new Date().toLocaleDateString('en-IN')
@@ -100,7 +196,6 @@ export default class CertificateTemplatesController {
 
       const content = `
 <div style="font-family: Arial, sans-serif; font-size: 15px; max-width: 800px; margin: auto; padding: 30px 20px; line-height: 1.6;">
-  <!-- Header -->
   <table style="width: 100%; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px;">
     <tr>
       <td style="width: 110px; text-align: center; vertical-align: middle;">
@@ -114,7 +209,6 @@ export default class CertificateTemplatesController {
     </tr>
   </table>
 
-  <!-- Table Details -->
   <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px;">
     <tr>
       <td colspan="3" style="border: 1px solid #333; padding: 8px; text-align: center; font-weight: bold; font-size: 18px; background-color: #f9f9f9;">Bonafide Certificate</td>
@@ -131,13 +225,11 @@ export default class CertificateTemplatesController {
     </tr>
   </table>
 
-  <!-- Cert Info -->
   <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 25px; font-size: 15px;">
     <span>Certificate No : ${certNumber}</span>
     <span>Date : ${currentDate}</span>
   </div>
 
-  <!-- Body -->
   <div style="text-align: justify;">
     <p style="margin-bottom: 15px;">
       This is to certify that Mr./Ms. <strong>${studentName}</strong> is a bonafide student of this College studying in <strong>${programme} ${academicSessionName}</strong> class.
@@ -160,7 +252,6 @@ export default class CertificateTemplatesController {
     </p>
   </div>
 
-  <!-- Signatures -->
   <table style="width: 100%; margin-top: 80px; border: none;">
     <tr>
       <td style="width: 50%; vertical-align: bottom;">
@@ -168,8 +259,7 @@ export default class CertificateTemplatesController {
       </td>
       <td style="width: 50%; text-align: center; vertical-align: bottom;">
         <p style="margin: 0; font-weight: bold; font-size: 16px;">Principal</p>
-        <p style="margin: 5px 0 0 0;">C. N. Kothari Homoeopathic Medical College &</p>
-        <p style="margin: 2px 0 0 0;">Research Center, Vyara</p>
+        <p style="margin: 5px 0 0 0;">C. N. K. H. M. C. &amp; Research Center, Vyara</p>
       </td>
     </tr>
   </table>
@@ -177,7 +267,7 @@ export default class CertificateTemplatesController {
 `
 
       return response.status(200).json({ success: true, data: { content, certificate_number: certNumber } })
-    } catch (error) {
+    } catch (error: any) {
       return response.status(500).json({ success: false, message: 'Failed to generate certificate', error: error.message })
     }
   }

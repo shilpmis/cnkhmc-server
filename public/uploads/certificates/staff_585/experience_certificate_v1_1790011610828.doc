@@ -1,0 +1,114 @@
+
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head>
+          <meta charset='utf-8'>
+          <title>Experience Certificate - John M Doe</title>
+          <!--[if gte mso 9]>
+          <xml>
+            <w:WordDocument>
+              <w:View>Print</w:View>
+              <w:Zoom>100</w:Zoom>
+              <w:DoNotOptimizeForBrowser/>
+            </w:WordDocument>
+          </xml>
+          <![endif]-->
+          <style>
+            @page Section1 {
+              size: 595.3pt 841.9pt;
+              margin: 72pt 72pt 72pt 72pt;
+              mso-header-margin: 36pt;
+              mso-footer-margin: 36pt;
+              mso-paper-source: 0;
+            }
+            div.Section1 { page: Section1; }
+            body {
+              font-family: 'Times New Roman', serif;
+              font-size: 12pt;
+              line-height: 1.5;
+              color: #000000;
+            }
+            p { margin: 0; margin-bottom: 12pt; }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 18pt;
+              margin-bottom: 18pt;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="Section1">
+            
+      <table style="width: 100%; border: none; border-bottom: 2px solid #1e3a8a; padding-bottom: 12px; margin-bottom: 25px;">
+        <tr>
+          <td style="border: none; width: 75px; vertical-align: middle; text-align: left;">
+            <img src="http://localhost:5174/college-logo.jpeg" width="65" height="65" alt="Logo" style="width: 65px; height: 65px; object-fit: contain;" />
+          </td>
+          <td style="border: none; vertical-align: middle; text-align: center; padding-right: 75px;">
+            <h1 style="font-size: 15pt; font-weight: bold; color: #1e3a8a; margin: 0 0 4px 0; line-height: 1.2;">
+              C. N. KOTHARI HOMOEOPATHIC MEDICAL COLLEGE<br/>&amp; RESEARCH CENTRE
+            </h1>
+            <h2 style="font-size: 10.5pt; font-weight: normal; margin: 0 0 3px 0; color: #333;">(Managed by: Vyara Pradesh Seva Samiti)</h2>
+            <p style="font-size: 9pt; margin: 0; color: #555;">Kakrapar Road, Vyara, Dist: Tapi, Gujarat - 394650 | Phone: 02626-220117</p>
+          </td>
+        </tr>
+      </table>
+            
+            <table style="width: 100%; border: none; margin-bottom: 24pt;">
+              <tr>
+                <td style="border: none; text-align: left; font-size: 12pt;">Ref. No. ____________ / C.N.K.H.M.C. & R.C. / Vyara / 20____</td>
+                <td style="border: none; text-align: right; font-size: 12pt;">Date: _____ / _____ / 20____</td>
+              </tr>
+            </table>
+
+            
+      <p style="text-align: center; margin-top: 24pt; margin-bottom: 24pt;">
+        <span style="font-size: 13pt; font-weight: bold; text-decoration: underline; text-transform: uppercase;">EXPERIENCE CERTIFICATE</span>
+      </p>
+
+      <p style="text-align: justify; font-size: 12pt; line-height: 1.8; margin-bottom: 18pt;">
+        This is to certify that Mr. John M Doe is an employee of this Organization and duties performed by him/her during the period(s) are as under:
+      </p>
+
+      
+    <table style="width: 100%; border-collapse: collapse; margin-top: 14pt; margin-bottom: 18pt; font-size: 11pt;">
+      <thead>
+        <tr style="background-color: #f2f2f2;">
+          <th style="border: 1px solid #000; padding: 6px 10px; text-align: center; font-weight: bold;">Name of post held</th>
+          <th style="border: 1px solid #000; padding: 6px 10px; text-align: center; font-weight: bold;">From dd/mm/yy</th>
+          <th style="border: 1px solid #000; padding: 6px 10px; text-align: center; font-weight: bold;">To dd/mm/yy</th>
+          <th style="border: 1px solid #000; padding: 6px 10px; text-align: center; font-weight: bold;">Department</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+      <tr>
+        <td style="border: 1px solid #000; padding: 6px 10px; text-align: center;">Principal</td>
+        <td style="border: 1px solid #000; padding: 6px 10px; text-align: center;">01/06/2020</td>
+        <td style="border: 1px solid #000; padding: 6px 10px; text-align: center;">Till date</td>
+        <td style="border: 1px solid #000; padding: 6px 10px; text-align: center;">Mathematics</td>
+      </tr>
+      </tbody>
+    </table>
+  
+
+      <p style="text-align: justify; font-size: 12pt; line-height: 1.8; margin-top: 18pt; margin-bottom: 60pt;">
+        He / She is found to be sincere and honest. He / She bears a good moral character and has good public behavior.
+      </p>
+
+      
+    <table style="width: 100%; border: none; margin-top: 50pt;">
+      <tr>
+        <td style="border: none; width: 60%;"></td>
+        <td style="border: none; width: 40%; text-align: center;">
+          <p style="font-size: 12pt; font-weight: bold; margin: 0;">Principal</p>
+          <p style="font-size: 11pt; margin: 2pt 0 0 0;">C. N. K. H. M. C. &amp; R. C., Vyara</p>
+        </td>
+      </tr>
+    </table>
+  
+    
+          </div>
+        </body>
+      </html>
+    

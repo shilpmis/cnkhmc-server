@@ -57,6 +57,7 @@ import ExamSchedulesController from '#controllers/exam_schedules_controller'
 import ExamSubjectsController from '#controllers/exam_subjects_controller'
 import PoliciesController from '#controllers/policies_controller'
 import AdmissionsController from '#controllers/AdmissionController'
+import StaffCertificatesController from '#controllers/StaffCertificatesController'
 
 router.get('/', async () => {
   return { status: 'ok', message: 'Server is running' }
@@ -185,6 +186,10 @@ router
     router.post('staff/bulk-upload', [StaffController, 'bulkUploadStaff'])
     router.post('staff/export/:school_id/:academic_session_id/', [StaffController, 'exportToExcel'])
     router.post('staff/experience/upload', [StaffExperiencesController, 'bulkUpload'])
+    
+    // Staff Certificates (Spaces upload & Audit Logging)
+    router.post('staff/:staff_id/certificates/generate', [StaffCertificatesController, 'generateAndUpload'])
+    router.get('staff/:staff_id/certificates/audit-logs', [StaffCertificatesController, 'getAuditLogs'])
     
     // Staff Configurations
     router.get('staff-configurations', [StaffConfigurationsController, 'index'])

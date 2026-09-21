@@ -34,5 +34,17 @@ export default await Env.create(new URL('../', import.meta.url), {
   | Variables for configuring session package
   |----------------------------------------------------------
   */
-  SESSION_DRIVER: Env.schema.enum(['cookie', 'memory'] as const)
+  SESSION_DRIVER: Env.schema.enum(['cookie', 'memory'] as const),
+
+  /*
+  |----------------------------------------------------------
+  | DigitalOcean Spaces (S3 compatible) Configuration
+  |----------------------------------------------------------
+  */
+  DO_SPACES_KEY: Env.schema.string.optional(),
+  DO_SPACES_SECRET: Env.schema.string.optional(),
+  DO_SPACES_ENDPOINT: Env.schema.string.optional(),
+  DO_SPACES_BUCKET: Env.schema.string.optional(),
+  DO_SPACES_REGION: Env.schema.string.optional(),
+  DO_SPACES_CDN_URL: Env.schema.string.optional(),
 })

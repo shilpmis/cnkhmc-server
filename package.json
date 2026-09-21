@@ -60,6 +60,7 @@
         "@adonisjs/lucid": "^21.5.1",
         "@adonisjs/session": "^7.5.0",
         "@adonisjs/validator": "^13.0.2",
+        "@aws-sdk/client-s3": "^3.1136.0",
         "@casl/ability": "^7.0.0",
         "@vinejs/vine": "^3.0.0",
         "bcrypt": "^5.1.1",
