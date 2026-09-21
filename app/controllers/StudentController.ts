@@ -655,10 +655,44 @@ export default class StundetsController {
     }
 
     const filePath = path.join(uploadDir, file.clientName)
-    const jsonData = await parseAndReturnJSON(filePath)
+    let jsonData: any[] = []
+
+    if (file.extname === 'xlsx' || file.extname === 'xls') {
+      const workbook = new ExcelJS.Workbook()
+      await workbook.xlsx.readFile(filePath)
+      const worksheet = workbook.getWorksheet(1)
+      const headers: string[] = []
+
+      worksheet?.getRow(1).eachCell((cell, colNumber) => {
+        headers[colNumber] = cell.text ? cell.text.trim() : `Col_${colNumber}`
+      })
+
+      worksheet?.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return
+        const rowData: any = {}
+        row.eachCell((cell, colNumber) => {
+          const header = headers[colNumber]
+          if (header) {
+            let val = cell.value
+            if (val !== null && val !== undefined && typeof val === 'object' && !(val instanceof Date)) {
+              if ('text' in val && typeof (val as any).text === 'string') val = (val as any).text
+              else if ('result' in val) val = (val as any).result
+              else if ('richText' in val && Array.isArray((val as any).richText)) val = (val as any).richText.map((r: any) => r.text).join('')
+              else if ('hyperlink' in val) val = (val as any).text || (val as any).hyperlink
+            }
+            rowData[header] = val
+          }
+        })
+        if (Object.values(rowData).some((v) => v !== null && v !== undefined && v !== '')) {
+          jsonData.push(rowData)
+        }
+      })
+    } else {
+      jsonData = await parseAndReturnJSON(filePath)
+    }
 
     if (!jsonData.length) {
-      return ctx.response.badRequest({ message: 'CSV file is empty or improperly formatted.' })
+      return ctx.response.badRequest({ message: 'File is empty or improperly formatted.' })
     }
 
     const isCollege = school.school_type === 'COLLEGE'

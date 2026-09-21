@@ -165,6 +165,7 @@ export default class StaffController {
         .where('school_id', school_id)
         .preload('role_type')  // Load staff role details
         .preload('letters')
+        .preload('experiences')
         .preload('assigend_classes', (query) => {
           return query.preload('divisions', (divisionQuery) => {
             divisionQuery.preload('class')
@@ -902,29 +903,52 @@ export default class StaffController {
       previousexperience: 'previous_experience',
     }
 
+    const extractCellValue = (val: any): any => {
+      if (val === null || val === undefined) return null
+      if (val instanceof Date) return val
+      if (typeof val === 'object') {
+        if ('text' in val && val.text !== undefined && val.text !== null) {
+          return typeof val.text === 'object' ? extractCellValue(val.text) : val.text
+        }
+        if ('result' in val && val.result !== undefined && val.result !== null) {
+          return typeof val.result === 'object' ? extractCellValue(val.result) : val.result
+        }
+        if ('richText' in val && Array.isArray(val.richText)) {
+          return val.richText.map((r: any) => r.text || '').join('')
+        }
+        if ('hyperlink' in val) {
+          const link = val.text || val.hyperlink
+          return typeof link === 'string' ? link.replace(/^mailto:/i, '') : extractCellValue(link)
+        }
+      }
+      return val
+    }
+
     const mappedData: any = {}
     for (const key of Object.keys(data)) {
+      const rawValue = extractCellValue(data[key])
       const originalKey = key.trim()
       const normalizedKey = originalKey.toLowerCase().replace(/[^a-z0-9]/g, '')
       const fieldName = headerMap[normalizedKey]
 
       if (fieldName) {
-        mappedData[fieldName] = data[key]
+        mappedData[fieldName] = rawValue
       } else {
         const snakeKey = originalKey.toLowerCase().replace(/\s+/g, '_')
-        mappedData[snakeKey] = data[key]
+        mappedData[snakeKey] = rawValue
       }
     }
 
     // Helper to normalize dates from Excel or CSV
     const normalizeDate = (val: any) => {
+      val = extractCellValue(val)
       if (val === null || val === undefined) return null
+      if (val instanceof Date) return DateTime.fromJSDate(val).toFormat('yyyy-MM-dd')
+
       const strVal = String(val).trim()
       if (!strVal || strVal === '-' || strVal.toLowerCase() === 'n/a' || strVal === '0' || strVal.toLowerCase() === 'null') {
         return null
       }
-
-      if (val instanceof Date) return DateTime.fromJSDate(val).toFormat('yyyy-MM-dd')
 
       if (typeof val === 'number') {
         // Excel serial date
@@ -986,6 +1010,10 @@ export default class StaffController {
       'university_approval_date',
       'university_appointment_date',
       'driving_licence_expiry',
+      'nch_registration_date',
+      'uni_approval_date',
+      'resignation_date',
+      'retirement_date',
     ]
     dateFields.forEach((field) => {
       if (field in mappedData) {
@@ -1037,6 +1065,7 @@ export default class StaffController {
 
     // Helper to normalize numbers from CSV strings
     const normalizeNumber = (val: any, fieldName = '') => {
+      val = extractCellValue(val)
       if (val === null || val === undefined) return null
       const strVal = String(val).trim()
       if (!strVal || strVal === '-' || strVal.toLowerCase() === 'n/a' || strVal.toLowerCase() === 'null') {
@@ -1074,6 +1103,12 @@ export default class StaffController {
       'aadhar_no',
       'account_no',
       'emergency_contact_number',
+      'department_id',
+      'ug_passing_year',
+      'pg_passing_year',
+      'diploma_passing_year',
+      'other_passing_year',
+      'retirement_age',
     ]
 
     numberFields.forEach((field) => {
@@ -1082,14 +1117,115 @@ export default class StaffController {
       }
     })
 
-    // Convert empty string properties to null so Vine doesn't fail on minLength/email/enum rules
-    Object.keys(mappedData).forEach((key) => {
-      if (typeof mappedData[key] === 'string') {
-        const trimmed = mappedData[key].trim()
-        if (trimmed === '' || trimmed === '-' || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'null') {
-          mappedData[key] = null
+    const stringFields = [
+      'remarks',
+      'first_name',
+      'middle_name',
+      'last_name',
+      'first_name_in_guj',
+      'middle_name_in_guj',
+      'last_name_in_guj',
+      'marital_status',
+      'qualification',
+      'subject_specialization',
+      'employment_status',
+      'pan_card_no',
+      'blood_group',
+      'religion',
+      'religion_in_guj',
+      'caste',
+      'caste_in_guj',
+      'category',
+      'nationality',
+      'address',
+      'permanent_address',
+      'district',
+      'city',
+      'state',
+      'bank_name',
+      'IFSC_code',
+      'promotion_date',
+      'department',
+      'short_name',
+      'minority',
+      'designation',
+      'staff_type',
+      'staff_category',
+      'nature_of_appointment',
+      'registration_authority',
+      'registration_number',
+      'nch_registration_no',
+      'council_name',
+      'ayush_teacher_code',
+      'md_subject',
+      'qualification_college',
+      'qualification_university',
+      'voter_id',
+      'driving_licence',
+      'uni_approval_number',
+      'branch_details',
+      'ayush_id_no',
+      'teacher_code',
+      'ayush_registration_no',
+      'university_approval_letter_no',
+      'bank_branch_name',
+      'state_council_reg_no',
+      'university_appointment_letter_no',
+      'area_of_expertise',
+      'ug_degree',
+      'ug_passing_university',
+      'pg_degree',
+      'pg_passing_university',
+      'diploma_degree',
+      'diploma_council',
+      'other_degree',
+      'other_passing_university',
+      'pay_scale',
+      'emergency_contact_name',
+      'profile_photo',
+    ]
+
+    stringFields.forEach((field) => {
+      if (field in mappedData && mappedData[field] !== null && mappedData[field] !== undefined) {
+        let val = extractCellValue(mappedData[field])
+        if (val !== null && val !== undefined) {
+          const str = String(val).trim()
+          mappedData[field] = str === '' || str === '-' || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null' ? null : str
         } else {
-          mappedData[key] = trimmed
+          mappedData[field] = null
+        }
+      }
+    })
+
+    // Clean email addresses (remove internal spaces, strip mailto:, convert to lowercase)
+    if ('email' in mappedData) {
+      const emailRaw = extractCellValue(mappedData.email)
+      if (emailRaw !== null && emailRaw !== undefined) {
+        let cleanEmail = String(emailRaw).replace(/\s+/g, '').toLowerCase().trim()
+        cleanEmail = cleanEmail.replace(/^mailto:/i, '')
+        if (cleanEmail.includes('@') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+          mappedData.email = cleanEmail
+        } else {
+          mappedData.email = null
+        }
+      } else {
+        mappedData.email = null
+      }
+    }
+
+    // Convert any remaining string or object properties that may be empty to null
+    Object.keys(mappedData).forEach((key) => {
+      if (mappedData[key] !== null && mappedData[key] !== undefined) {
+        if (typeof mappedData[key] === 'object' && !(mappedData[key] instanceof Date)) {
+          mappedData[key] = extractCellValue(mappedData[key])
+        }
+        if (typeof mappedData[key] === 'string') {
+          const trimmed = mappedData[key].trim()
+          if (trimmed === '' || trimmed === '-' || trimmed.toLowerCase() === 'n/a' || trimmed.toLowerCase() === 'null') {
+            mappedData[key] = null
+          } else {
+            mappedData[key] = trimmed
+          }
         }
       }
     })
@@ -1103,16 +1239,6 @@ export default class StaffController {
     }
     if (mappedData.voter_id && typeof mappedData.voter_id === 'string') {
       mappedData.voter_id = mappedData.voter_id.replace(/\s+/g, '').toUpperCase()
-    }
-
-    // Clean email addresses (remove internal spaces, convert to lowercase)
-    if (mappedData.email && typeof mappedData.email === 'string') {
-      const cleanEmail = mappedData.email.replace(/\s+/g, '').toLowerCase()
-      if (cleanEmail.includes('@') && cleanEmail.length > 3) {
-        mappedData.email = cleanEmail
-      } else {
-        mappedData.email = null
-      }
     }
 
     // Ensure fallback defaults for mandatory fields
@@ -1180,7 +1306,17 @@ export default class StaffController {
           if (rowNumber === 1) return
           const rowData: any = {}
           row.eachCell((cell, colNumber) => {
-            rowData[headers[colNumber]] = cell.value
+            const header = headers[colNumber]
+            if (header) {
+              let val = cell.value
+              if (val !== null && val !== undefined && typeof val === 'object' && !(val instanceof Date)) {
+                if ('text' in val && typeof (val as any).text === 'string') val = (val as any).text
+                else if ('result' in val) val = (val as any).result
+                else if ('richText' in val && Array.isArray((val as any).richText)) val = (val as any).richText.map((r: any) => r.text).join('')
+                else if ('hyperlink' in val) val = (val as any).text || (val as any).hyperlink
+              }
+              rowData[header] = val
+            }
           })
           jsonData.push(rowData)
         })
@@ -1476,20 +1612,21 @@ export default class StaffController {
       const query = db
         .query()
         .from('staff as s')
-        .join('staff_enrollments as se', 's.id', 'se.staff_id')
-        .join('staff_role_master as sm', 's.staff_role_id', 'sm.id')
+        .leftJoin('staff_role_master as sm', 's.staff_role_id', 'sm.id')
         .where('s.school_id', school_id as number)
 
       if (staff_type === 'teaching') {
-        query.where('sm.is_teaching_role', 1)
+        query.where((q) => {
+          q.where('sm.is_teaching_role', 1).orWhere('s.is_teching_staff', 1)
+        })
       } else if (staff_type === 'hospital') {
         query.where('s.staff_type', 'Hospital Staff')
       } else {
-        query.where('sm.is_teaching_role', 0)
-             .where((q) => {
-               q.whereNull('s.staff_type')
-                .orWhereNot('s.staff_type', 'Hospital Staff')
-             })
+        query.where((q) => {
+          q.whereNull('sm.is_teaching_role').orWhere('sm.is_teaching_role', 0)
+        }).where((q) => {
+          q.whereNull('s.staff_type').orWhereNot('s.staff_type', 'Hospital Staff')
+        })
       }
 
       const staff = await query.select(['s.*', 'sm.role'])

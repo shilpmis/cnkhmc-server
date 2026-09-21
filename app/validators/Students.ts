@@ -225,11 +225,11 @@ export const CreateValidatorForUpload = vine.compile(
 
       primary_mobile: vine.number(),
 
-      father_name: vine.string().trim().minLength(3).maxLength(50).nullable(),
-      father_name_in_guj: vine.string().trim().nullable(),
+      father_name: vine.string().trim().maxLength(100).nullable().optional(),
+      father_name_in_guj: vine.string().trim().nullable().optional(),
 
-      mother_name: vine.string().trim().minLength(3).maxLength(50).nullable(),
-      mother_name_in_guj: vine.string().trim().nullable(),
+      mother_name: vine.string().trim().maxLength(100).nullable().optional(),
+      mother_name_in_guj: vine.string().trim().nullable().optional(),
 
       /**
        * FIX : make this optional or remove roll number from table in next migrtion
@@ -240,7 +240,7 @@ export const CreateValidatorForUpload = vine.compile(
       third_year_roll_number: vine.number().positive().nullable().optional(),
       fourth_year_roll_number: vine.number().positive().nullable().optional(),
 
-      aadhar_no: vine.number().nullable(),
+      aadhar_no: vine.number().nullable().optional(),
 
       is_active: vine.boolean().nullable().optional(),
       student_type: vine.enum(['SCHOOL', 'COLLEGE']).optional(),
@@ -251,16 +251,17 @@ export const CreateValidatorForUpload = vine.compile(
         aadhar_dise_no: vine
           .number()
           // .unique({ table: 'students_meta', column: 'aadhar_dise_no' })
-          .nullable(),
+          .nullable()
+          .optional(),
 
-        birth_place: vine.string().trim().minLength(2).maxLength(100).nullable(),
-        birth_place_in_guj: vine.string().trim().nullable(),
+        birth_place: vine.string().trim().maxLength(100).nullable().optional(),
+        birth_place_in_guj: vine.string().trim().nullable().optional(),
 
-        religion: vine.string().trim().minLength(2).maxLength(50).nullable(),
-        religion_in_guj: vine.string().trim().nullable(),
+        religion: vine.string().trim().maxLength(50).nullable().optional(),
+        religion_in_guj: vine.string().trim().nullable().optional(),
 
-        caste: vine.string().trim().minLength(2).maxLength(50).nullable(),
-        caste_in_guj: vine.string().trim().nullable(),
+        caste: vine.string().trim().maxLength(50).nullable().optional(),
+        caste_in_guj: vine.string().trim().nullable().optional(),
 
         category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).nullable().optional(),
 
@@ -268,17 +269,17 @@ export const CreateValidatorForUpload = vine.compile(
 
         admission_class_id: vine.number().nullable().optional(),
 
-        secondary_mobile: vine.number().nullable(),
+        secondary_mobile: vine.number().nullable().optional(),
 
-        privious_school: vine.string().trim().minLength(2).maxLength(100).nullable().optional(),
+        privious_school: vine.string().trim().maxLength(150).nullable().optional(),
         privious_school_in_guj: vine.string().trim().optional().nullable(),
 
-        address: vine.string().trim().minLength(5).maxLength(200).nullable(),
+        address: vine.string().trim().maxLength(255).nullable().optional(),
 
-        district: vine.string().trim().minLength(3).maxLength(100).nullable().optional(),
-        city: vine.string().trim().minLength(3).maxLength(100).nullable(),
+        district: vine.string().trim().maxLength(100).nullable().optional(),
+        city: vine.string().trim().maxLength(100).nullable().optional(),
 
-        state: vine.string().trim().minLength(3).maxLength(50).nullable(),
+        state: vine.string().trim().maxLength(100).nullable().optional(),
 
         postal_code: vine.string().trim().nullable(),
 
@@ -718,7 +719,7 @@ export const createStudentValidatorForOnBoarding = vine.compile(
       last_name: vine.string().trim().minLength(2).maxLength(50),
       birth_date : vine.date().nullable().optional(),
       class_id : vine.number(),
-      division_id : vine.number(),
+      division_id : vine.number().nullable().optional(),
       gender: vine.enum(['Male', 'Female']).nullable().optional(),
       primary_mobile : vine.number(),
       father_name: vine.string().trim().minLength(3).maxLength(50).nullable().optional(),

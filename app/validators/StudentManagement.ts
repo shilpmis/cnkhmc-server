@@ -4,7 +4,7 @@ export const ValidatioinStatusForMigration = vine.compile(
   vine.object({
     reason: vine.string(),
     migrated_class: vine.number(),
-    migrated_division : vine.number(),
+    migrated_division : vine.number().nullable().optional(),
     is_migration_for_class: vine.boolean(),
   })
 )

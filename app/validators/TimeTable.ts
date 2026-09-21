@@ -82,7 +82,7 @@ export const UpdateValidatorForClassDayConfig = vine.compile(
 export const CreateValidatorForPeriodConfig = vine.compile(
   vine.object({
     class_day_config_id: vine.number(),
-    division_id: vine.number(),
+    division_id: vine.number().nullable().optional(),
     periods: vine.array(
       vine.object({
         period_order: vine.number(),
@@ -105,7 +105,7 @@ export const CreateValidatorForPeriodConfig = vine.compile(
 export const UpdateValidatorForPeriodConfig = vine.compile(
   vine.object({
     class_day_config_id: vine.number(),
-    division_id: vine.number(),
+    division_id: vine.number().nullable().optional(),
     periods: vine.array(
       vine.object({
         id : vine.number().optional(), 
@@ -130,7 +130,7 @@ export const ValidatorForCheckPeriodConfig = vine.compile(
   vine.object({
     id: vine.number().optional(),
     class_day_config_id: vine.number(),
-    division_id: vine.number(),
+    division_id: vine.number().nullable().optional(),
     period_order: vine.number(),
     start_time: vine.string(), 
     end_time: vine.string(),
@@ -148,7 +148,7 @@ export const ValidatorForCheckPeriodConfig = vine.compile(
 
 export const UpdateValidatorForPeriodConfigWeek = vine.compile(
   vine.object({
-    division_id: vine.number(),
+    division_id: vine.number().nullable().optional(),
     days: vine.array(
       vine.object({
         class_day_config_id: vine.number(),

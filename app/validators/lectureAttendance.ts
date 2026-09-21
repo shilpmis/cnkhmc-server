@@ -2,7 +2,7 @@ import vine from '@vinejs/vine'
 
 export const ValidatorForMarkLectureAttendance = vine.compile(
   vine.object({
-    division_id: vine.number(),
+    division_id: vine.number().nullable().optional(),
     subject_id: vine.number(),
     academic_year: vine.number(),
     date: vine.date(),

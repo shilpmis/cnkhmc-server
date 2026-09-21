@@ -34,7 +34,7 @@ export const UpdateValidatorForSubject = vine.compile(
 export const CreateValidatorForAssignSubject = vine.compile(
   
   vine.object ({
-    division_id: vine.number(),
+    division_id: vine.number().nullable().optional(),
     academic_year: vine.number().optional(),
     academic_session_id: vine.number().optional(),
     subjects : vine.array(
