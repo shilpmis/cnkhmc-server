@@ -164,34 +164,73 @@ export default class LeavesController {
       return ctx.response.status(200).json([])
     }
 
-    let query = LeavePolicies.query()
-      .preload('leave_type')
-      .preload('staff_role')
-      .where('school_id', ctx.auth.user!.school_id!)
-      .andWhere('academic_year', academic_year)
+    // Helper to build a base policy query for this school + academic year
+    const basePolicyQuery = () =>
+      LeavePolicies.query()
+        .preload('leave_type')
+        .preload('staff_role')
+        .where('school_id', ctx.auth.user!.school_id!)
+        .andWhere('academic_year', academic_year)
 
-    if (staff.staff_role_id) {
-      query = query.where((q) => {
-        q.where('staff_role_id', staff.staff_role_id).orWhereNull('staff_role_id')
-      })
+    // 3-tier priority: template → role → global (only if nothing else matches)
+    let leave_policies: LeavePolicies[] = []
+
+    if (staff.leave_template_id) {
+      leave_policies = await basePolicyQuery()
+        .where('leave_template_id', staff.leave_template_id)
+        .orderBy('id', 'desc')
     }
 
-    let leave_policies = await query.orderBy('id', 'desc')
+    if (leave_policies.length === 0 && staff.staff_role_id) {
+      leave_policies = await basePolicyQuery()
+        .where('staff_role_id', staff.staff_role_id)
+        .orderBy('id', 'desc')
+    }
+
+    // Fall back to global/school-wide policies, filtered by applicable_staff_type
+    if (leave_policies.length === 0) {
+      const typeStr = (staff.staff_type || '').toLowerCase()
+      leave_policies = await basePolicyQuery()
+        .whereNull('staff_role_id')
+        .whereNull('leave_template_id')
+        .where((q) => {
+          if (typeStr.includes('non vact') || typeStr.includes('non-vact') || typeStr.includes('non vacat')) {
+            q.where('applicable_staff_type', 'Non Vactional Teaching')
+          } else if (typeStr.includes('vact') || typeStr.includes('vacat')) {
+            q.where('applicable_staff_type', 'Vactional Staff Teaching')
+          } else if (staff.staff_type) {
+            q.where('applicable_staff_type', staff.staff_type!).orWhereNull('applicable_staff_type')
+          } else {
+            q.whereNull('applicable_staff_type')
+          }
+        })
+        .orderBy('id', 'desc')
+    }
 
     const leaveBalances = await this.getStaffLeaveBalances(Number(staff_id), academic_year)
 
-    // Combine policies with their balances
+    // Combine policies with their balances, deriving effective used_leaves
     const result = leave_policies.map(policy => {
-      const balance = leaveBalances.find(b => b.leave_type_id === policy.leave_type_id) || {
-        total_leaves: policy.annual_quota,
-        used_leaves: 0,
-        pending_leaves: 0,
-        available_balance: policy.annual_quota
+      const bal = leaveBalances.find(b => b.leave_type_id === policy.leave_type_id)
+
+      let used = 0
+      let total = Number(policy.annual_quota) || 0
+      let available = total
+      let pending = 0
+
+      if (bal) {
+        total = Number(bal.total_leaves) || total
+        pending = Number(bal.pending_leaves) || 0
+        used = Number(bal.used_leaves) || 0
+        available = Number(bal.available_balance)
+        if (available <= 0 && used < total) {
+          available = Math.max(0, this.formatDecimalValue(total - used - pending))
+        }
       }
 
       return {
         ...policy.serialize(),
-        balance
+        balance: { total_leaves: total, used_leaves: used, pending_leaves: pending, available_balance: available }
       }
     })
 
@@ -507,6 +546,19 @@ export default class LeavesController {
       if (staff.staff_role_id) {
         policyQuery = policyQuery.where((q) => {
           q.where('staff_role_id', staff.staff_role_id).orWhereNull('staff_role_id')
+        })
+      }
+
+      if (staff.staff_type) {
+        const typeStr = staff.staff_type.toLowerCase()
+        policyQuery = policyQuery.where((q) => {
+          if (typeStr.includes('non vact') || typeStr.includes('non-vact') || typeStr.includes('non vacat')) {
+            q.where('applicable_staff_type', 'Non Vactional Teaching')
+          } else if (typeStr.includes('vact') || typeStr.includes('vacat')) {
+            q.where('applicable_staff_type', 'Vactional Staff Teaching')
+          } else {
+            q.where('applicable_staff_type', staff.staff_type!).orWhereNull('applicable_staff_type')
+          }
         })
       }
 
@@ -1160,31 +1212,60 @@ export default class LeavesController {
       })
     }
 
-    // Get leave policies for this staff member (via template or fallback to role)
-    let policyQuery = LeavePolicies.query()
-      .preload('leave_type')
-      .preload('leave_template')
-      .andWhere('academic_year', academicYear)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+    // Build a base policy query for this school + academic year
+    const basePolicyQuery = () =>
+      LeavePolicies.query()
+        .preload('leave_type')
+        .andWhere('academic_year', academicYear)
+        .andWhere('school_id', ctx.auth.user!.school_id!)
+
+    // 1. Try to find policies specific to this staff's template or role
+    let leavePolicies: LeavePolicies[] = []
 
     if (staff.leave_template_id) {
-      policyQuery = policyQuery.where('leave_template_id', staff.leave_template_id)
-    } else if (staff.staff_role_id) {
-      policyQuery = policyQuery.where('staff_role_id', staff.staff_role_id)
+      leavePolicies = await basePolicyQuery().where('leave_template_id', staff.leave_template_id)
     }
 
-    const leavePolicies = await policyQuery
+    if (leavePolicies.length === 0 && staff.staff_role_id) {
+      leavePolicies = await basePolicyQuery().where('staff_role_id', staff.staff_role_id)
+    }
 
-    // Get all leave balances for the staff
+    // 2. If still no policies found, fall back to school-wide global policies
+    //    filtered by applicable_staff_type so each staff only sees their own leave types.
+    if (leavePolicies.length === 0) {
+      leavePolicies = await basePolicyQuery()
+        .whereNull('staff_role_id')
+        .whereNull('leave_template_id')
+        .where((q) => {
+          if (staff.staff_type) {
+            q.where('applicable_staff_type', staff.staff_type).orWhereNull('applicable_staff_type')
+          } else {
+            q.whereNull('applicable_staff_type')
+          }
+        })
+    }
+
+    // Get all existing leave balances for the staff
     const leaveBalances = await this.getStaffLeaveBalances(staffId, academicYear)
 
     // Combine policies with their balances
     const result = leavePolicies.map(policy => {
-      const balance = leaveBalances.find(b => b.leave_type_id === policy.leave_type_id) || {
-        total_leaves: policy.annual_quota,
-        used_leaves: 0,
-        pending_leaves: 0,
-        available_balance: policy.annual_quota
+      const bal = leaveBalances.find(b => b.leave_type_id === policy.leave_type_id)
+
+      let used = 0
+      let total = Number(policy.annual_quota) || 0
+      let available = total
+      let pending = 0
+
+      if (bal) {
+        total = Number(bal.total_leaves) || total
+        available = Number(bal.available_balance) ?? total
+        pending = Number(bal.pending_leaves) || 0
+        const dbUsed = Number(bal.used_leaves) || 0
+        // Derive effective used: total - available - pending covers cases where
+        // used_leaves wasn't updated on approval
+        const derivedUsed = Math.max(0, this.formatDecimalValue(total - available - pending))
+        used = Math.max(dbUsed, derivedUsed)
       }
 
       return {
@@ -1196,12 +1277,18 @@ export default class LeavesController {
           max_consecutive_days: policy.max_consecutive_days,
           can_carry_forward: policy.can_carry_forward
         },
-        balance
+        balance: {
+          total_leaves: total,
+          used_leaves: used,
+          pending_leaves: pending,
+          available_balance: available,
+        }
       }
     })
 
     return ctx.response.status(200).json(result)
   }
+
 
   async searchStaff(ctx: HttpContext) {
     try {
@@ -1712,9 +1799,14 @@ export default class LeavesController {
       // Fetch all active leave types for school
       let leaveTypesQuery = LeaveTypeMaster.query().where('school_id', school_id)
       if (academic_year) {
-        leaveTypesQuery = leaveTypesQuery.where('academic_year', academic_year)
+        leaveTypesQuery = leaveTypesQuery.where((q) => {
+          q.where('academic_year', academic_year).orWhereNull('academic_year')
+        })
       }
-      const leaveTypes = await leaveTypesQuery
+      let leaveTypes = await leaveTypesQuery
+      if (leaveTypes.length === 0) {
+        leaveTypes = await LeaveTypeMaster.query().where('school_id', school_id)
+      }
 
       // Fetch staff for school
       let staffQuery = Staff.query()
@@ -1735,6 +1827,15 @@ export default class LeavesController {
 
       const staffList = await staffQuery
 
+      // Fetch all leave policies for school
+      let policiesQuery = LeavePolicies.query().where('school_id', school_id)
+      if (academic_year) {
+        policiesQuery = policiesQuery.where((q) => {
+          q.where('academic_year', academic_year).orWhereNull('academic_year')
+        })
+      }
+      const allPolicies = await policiesQuery
+
       // Fetch all balances
       let balancesQuery = StaffLeaveBalance.query().preload('leave_type')
       if (academic_year) {
@@ -1750,6 +1851,18 @@ export default class LeavesController {
         balancesByStaff.set(b.staff_id, list)
       })
 
+      // Fetch actual approved leave applications totals by staff and leave type
+      const approvedApps = await db.from('staff_leave_applications')
+        .where('status', 'approved')
+        .select('staff_id', 'leave_type_id')
+        .sum('number_of_days as total_used')
+        .groupBy('staff_id', 'leave_type_id')
+
+      const approvedUsageMap = new Map<string, number>()
+      approvedApps.forEach((row: any) => {
+        approvedUsageMap.set(`${row.staff_id}-${row.leave_type_id}`, Number(row.total_used) || 0)
+      })
+
       const summary = staffList.map((st) => {
         const staffBalances = balancesByStaff.get(st.id) || []
 
@@ -1759,9 +1872,55 @@ export default class LeavesController {
 
         leaveTypes.forEach((lt) => {
           const bal = staffBalances.find((b) => b.leave_type_id === lt.id)
-          const used = bal ? Number(bal.used_leaves) || 0 : 0
-          const total = bal ? Number(bal.total_leaves) || 0 : 0
-          const available = bal ? Number(bal.available_balance) || 0 : 0
+          const actualApproved = approvedUsageMap.get(`${st.id}-${lt.id}`) || 0
+
+          let used = 0
+          let total = 0
+          let available = 0
+          let pending = 0
+
+          const matchingPolicies = allPolicies.filter((p) => p.leave_type_id === lt.id)
+          const isApplicable = matchingPolicies.length === 0 || matchingPolicies.some((p) => this.isPolicyApplicableToStaff(p, st))
+
+          if (bal) {
+            const dbUsed = Number(bal.used_leaves) || 0
+            used = Math.max(dbUsed, actualApproved)
+            if (isApplicable) {
+              total = Number(bal.total_leaves) || 0
+              pending = Number(bal.pending_leaves) || 0
+              available = Number(bal.available_balance)
+              if (available <= 0 && used < total) {
+                available = Math.max(0, this.formatDecimalValue(total - used - pending))
+              }
+            } else {
+              // Obsolete/mismatched leave balance for this staff member
+              total = used
+              available = 0
+            }
+          } else if (isApplicable) {
+            // Only match policy if it explicitly matches st.leave_template_id or st.staff_role_id or st.staff_type
+            let policy = matchingPolicies.find((p) => st.leave_template_id && p.leave_template_id === st.leave_template_id)
+            if (!policy && st.staff_role_id) {
+              policy = matchingPolicies.find((p) => p.staff_role_id === st.staff_role_id)
+            }
+            if (!policy) {
+              policy = matchingPolicies.find((p) => this.isPolicyApplicableToStaff(p, st))
+            }
+
+            if (policy) {
+              used = actualApproved
+              total = Number(policy.annual_quota) || 0
+              available = Math.max(0, total - used)
+            } else if (actualApproved > 0) {
+              used = actualApproved
+              total = used
+              available = 0
+            }
+          } else if (actualApproved > 0) {
+            used = actualApproved
+            total = used
+            available = 0
+          }
 
           totalTaken += used
           totalAvailable += available
@@ -1799,6 +1958,7 @@ export default class LeavesController {
   async fetchIndividualTeacherLeaveReport(ctx: HttpContext) {
     try {
       const staff_id = ctx.params.staff_id
+      const academic_year = ctx.request.input('academic_year')
       if (!staff_id) {
         return ctx.response.status(400).json({ message: 'Staff ID is required.' })
       }
@@ -1812,10 +1972,62 @@ export default class LeavesController {
         return ctx.response.status(404).json({ message: 'Staff member not found.' })
       }
 
+      // Fetch policies explicitly matching this staff member
+      let policyQuery = LeavePolicies.query()
+        .preload('leave_type')
+        .where('school_id', staff.school_id)
+      if (academic_year) {
+        policyQuery = policyQuery.where((q) => {
+          q.where('academic_year', academic_year).orWhereNull('academic_year')
+        })
+      }
+      if (staff.leave_template_id) {
+        policyQuery = policyQuery.where('leave_template_id', staff.leave_template_id)
+      } else if (staff.staff_role_id) {
+        policyQuery = policyQuery.where('staff_role_id', staff.staff_role_id)
+      } else {
+        policyQuery = policyQuery.whereNull('leave_template_id').whereNull('staff_role_id')
+      }
+      const leavePolicies = await policyQuery
+
       // Fetch balances
-      const balances = await StaffLeaveBalance.query()
+      let balancesQuery = StaffLeaveBalance.query()
         .where('staff_id', staff_id)
         .preload('leave_type')
+      if (academic_year) {
+        balancesQuery = balancesQuery.where('academic_year', academic_year)
+      }
+      const existingBalances = await balancesQuery
+
+      const combinedBalances = leavePolicies.map((policy) => {
+        const bal = existingBalances.find((b) => b.leave_type_id === policy.leave_type_id)
+        if (bal) {
+          return bal
+        }
+        return {
+          id: `policy-${policy.id}`,
+          staff_id: Number(staff_id),
+          leave_type_id: policy.leave_type_id,
+          leave_type: policy.leave_type,
+          total_leaves: policy.annual_quota,
+          used_leaves: 0,
+          pending_leaves: 0,
+          carried_forward: 0,
+          available_balance: policy.annual_quota,
+        }
+      })
+
+      const allSchoolPolicies = await LeavePolicies.query().where('school_id', staff.school_id)
+      const policyLeaveTypeIds = new Set(leavePolicies.map((p) => p.leave_type_id))
+      const extraBalances = existingBalances.filter((b) => {
+        if (policyLeaveTypeIds.has(b.leave_type_id)) return false
+        const matchingPolicy = allSchoolPolicies.find((p) => p.leave_type_id === b.leave_type_id)
+        if (matchingPolicy && !this.isPolicyApplicableToStaff(matchingPolicy, staff) && Number(b.used_leaves) === 0) {
+          return false
+        }
+        return true
+      })
+      const finalBalances = [...combinedBalances, ...extraBalances]
 
       // Fetch applications
       const applications = await StaffLeaveApplication.query()
@@ -1840,13 +2052,50 @@ export default class LeavesController {
           employee_id: (staff as any).employee_id || (staff as any).staff_code || `ST-${staff.id}`,
           department: typeof staff.department === 'string' && staff.department.trim() ? staff.department : staff.department_details?.name || 'N/A',
         },
-        balances,
+        balances: finalBalances,
         applications,
         comp_off_requests: compOffs,
       })
-    } catch (error) {
+    } catch (error: any) {
       return ctx.response.status(500).json({ message: 'Failed to fetch individual leave report', error: error.message })
     }
+  }
+
+  isPolicyApplicableToStaff(
+    policy: { applicable_staff_type?: string | null } | null | undefined,
+    staff: { staff_type?: string | null; is_teaching_role?: boolean }
+  ): boolean {
+    if (!policy || !policy.applicable_staff_type) return true // Global policy applies to all
+
+    const staffTypeLower = (staff.staff_type || (staff.is_teaching_role ? 'teaching' : 'non-teaching')).toLowerCase()
+    const policyAppTypeLower = (policy.applicable_staff_type || '').toLowerCase()
+
+    // Hospital staff
+    if (staffTypeLower.includes('hospital')) {
+      return policyAppTypeLower.includes('hospital')
+    }
+
+    // Non-teaching staff
+    if (staffTypeLower.includes('non-teaching') || staffTypeLower.includes('non teaching')) {
+      return policyAppTypeLower.includes('non-teaching') || policyAppTypeLower.includes('non teaching')
+    }
+
+    // Teaching staff
+    if (staffTypeLower.includes('teaching')) {
+      if (policyAppTypeLower.includes('hospital') || policyAppTypeLower.includes('non-teaching') || policyAppTypeLower.includes('non teaching')) {
+        return false
+      }
+      const isStaffNonVacational = staffTypeLower.includes('non vact') || staffTypeLower.includes('non-vact') || staffTypeLower.includes('non vacat')
+      const isPolicyNonVacational = policyAppTypeLower.includes('non vact') || policyAppTypeLower.includes('non-vact') || policyAppTypeLower.includes('non vacat')
+      const isStaffVacational = !isStaffNonVacational && (staffTypeLower.includes('vact') || staffTypeLower.includes('vacat'))
+      const isPolicyVacational = !isPolicyNonVacational && (policyAppTypeLower.includes('vact') || policyAppTypeLower.includes('vacat'))
+
+      if (isStaffNonVacational) return isPolicyNonVacational
+      if (isStaffVacational) return isPolicyVacational
+      return true
+    }
+
+    return policyAppTypeLower === staffTypeLower
   }
 }
 

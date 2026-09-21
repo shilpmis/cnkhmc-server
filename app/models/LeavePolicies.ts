@@ -42,6 +42,9 @@ export default class LeavePolicies extends Base {
   @column()
   declare approval_hierarchy: Object
 
+  @column()
+  declare applicable_staff_type: string | null
+
   @belongsTo(() => StaffMaster, {
     localKey: 'id',
     foreignKey: 'staff_role_id',

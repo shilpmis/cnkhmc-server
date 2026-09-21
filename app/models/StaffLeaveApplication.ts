@@ -53,7 +53,7 @@ export default class StaffLeaveApplication extends Base {
   declare is_half_day: boolean
 
   @column()
-  declare half_day_type: 'first_half' | 'second_half' | 'none'
+  declare half_day_type: 'first_half' | 'second_half' | 'noon' | 'none'
 
   @column()
   declare is_hourly_leave: boolean
