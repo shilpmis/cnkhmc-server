@@ -8,10 +8,10 @@ export default class HostelBed extends BaseModel {
   @column({ isPrimary: true })
   declare id: number
 
-  @column()
+  @column({ columnName: 'room_id' })
   declare roomId: number
 
-  @column()
+  @column({ columnName: 'bed_number' })
   declare bedNumber: string
 
   @column()
@@ -23,7 +23,7 @@ export default class HostelBed extends BaseModel {
   @column.dateTime({ autoCreate: true, autoUpdate: true })
   declare updatedAt: DateTime
 
-  @belongsTo(() => HostelRoom)
+  @belongsTo(() => HostelRoom, { foreignKey: 'roomId' })
   declare room: BelongsTo<typeof HostelRoom>
 
   @hasMany(() => HostelAllocation, { foreignKey: 'bedId' })

@@ -1072,15 +1072,101 @@ export default class StundetsController {
     const headers = ['class', 'division', ...fields.students, ...fields.student_meta]
     worksheet.addRow(headers)
 
+    const dateFields = [
+      'birth_date',
+      'admission_date',
+      'student_lc_date',
+      'internship_provisional_date',
+      'internship_starting_date',
+      'internship_completion_date',
+      'final_bhms_passing_date',
+      'admission_cancel_date',
+      'admission_transfer_date',
+    ]
+
+    const textFields = [
+      'aadhar_no',
+      'primary_mobile',
+      'secondary_mobile',
+      'aadhar_dise_no',
+      'gr_no',
+      'roll_number',
+      'account_no',
+      'IFSC_code',
+      'pen',
+      'abha_card_no',
+      'school_udise_no',
+      'father_mobile',
+      'mother_mobile',
+      'guardian_mobile',
+      'neet_roll_no',
+      'neet_application_number',
+      'ayush_id',
+      'abc_id',
+      'admission_number',
+      'enrollment_code',
+      'student_code',
+      'student_lc_no',
+      'internship_provisional_number',
+      'postal_code',
+      'permanent_pincode',
+    ]
+
+    const formatStudentDate = (val: any): string => {
+      if (val === null || val === undefined || val === '') return ''
+      if (val instanceof Date) {
+        if (isNaN(val.getTime())) return ''
+        const y = val.getUTCFullYear()
+        const m = String(val.getUTCMonth() + 1).padStart(2, '0')
+        const d = String(val.getUTCDate()).padStart(2, '0')
+        return `${d}/${m}/${y}`
+      }
+      if (typeof val === 'string') {
+        const trimmed = val.trim()
+        if (!trimmed) return ''
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) return trimmed
+        const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/)
+        if (match) {
+          const [, y, m, d] = match
+          return `${d}/${m}/${y}`
+        }
+        const parsed = new Date(trimmed)
+        if (!isNaN(parsed.getTime())) {
+          const y = parsed.getFullYear()
+          const m = String(parsed.getMonth() + 1).padStart(2, '0')
+          const d = String(parsed.getDate()).padStart(2, '0')
+          return `${d}/${m}/${y}`
+        }
+        return trimmed
+      }
+      return String(val)
+    }
+
     // Add Data
     mergedData.forEach((data: any) => {
       const currentDiv = divisionsMap.get(data._division_id)
       const rowValues = headers.map((header: string) => {
         if (header === 'class') return currentDiv?.class?.class || division.class.class
         if (header === 'division') return currentDiv?.division || ''
-        return (data as Record<string, any>)[header] || ''
+        
+        const rawVal = (data as Record<string, any>)[header]
+        if (rawVal === null || rawVal === undefined || rawVal === '') return ''
+
+        if (dateFields.includes(header)) {
+          return formatStudentDate(rawVal)
+        }
+        if (textFields.includes(header)) {
+          return String(rawVal).trim()
+        }
+        return rawVal
       })
-      worksheet.addRow(rowValues)
+      const addedRow = worksheet.addRow(rowValues)
+      headers.forEach((header, idx) => {
+        if (dateFields.includes(header) || textFields.includes(header)) {
+          const cell = addedRow.getCell(idx + 1)
+          cell.numFmt = '@'
+        }
+      })
     })
 
     // Generate File Buffer

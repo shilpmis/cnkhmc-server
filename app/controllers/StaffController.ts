@@ -1646,6 +1646,7 @@ export default class StaffController {
         .query()
         .from('staff as s')
         .leftJoin('staff_role_master as sm', 's.staff_role_id', 'sm.id')
+        .leftJoin('departments as d', 's.department_id', 'd.id')
         .where('s.school_id', school_id as number)
 
       if (staff_type === 'teaching') {
@@ -1662,7 +1663,7 @@ export default class StaffController {
         })
       }
 
-      const staff = await query.select(['s.*', 'sm.role'])
+      const staff = await query.select(['s.*', 'sm.role', 'd.name as department_name'])
 
       if (staff.length === 0) {
         return ctx.response.badRequest({ error: 'No staff found matching the criteria' })
@@ -1695,13 +1696,106 @@ export default class StaffController {
       worksheet.addRow(fields)
 
       // Add data rows
+      const dateFields = [
+        'birth_date',
+        'joining_date',
+        'date_of_appointment',
+        'appointment_date',
+        'promotion_date',
+        'date_of_promotion',
+        'registration_date',
+        'date_of_registration',
+        'nch_registration_date',
+        'university_appointment_date',
+        'university_approval_date',
+        'uni_approval_date',
+        'passing_date',
+        'date_of_passing',
+        'driving_licence_expiry',
+        'driving_license_validity',
+        'retirement_date',
+        'resignation_date',
+      ]
+
+      const textFields = [
+        'aadhar_no',
+        'mobile_number',
+        'emergency_contact_number',
+        'pan_card_no',
+        'account_no',
+        'epf_no',
+        'epf_uan_no',
+        'teacher_code',
+        'ayush_teacher_code',
+        'ayush_id_no',
+        'ayush_registration_no',
+        'state_council_reg_no',
+        'registration_number',
+        'registration_no',
+        'nch_registration_no',
+        'IFSC_code',
+        'employee_code',
+        'postal_code',
+        'voter_id',
+        'voter_id_no',
+        'driving_licence',
+        'driving_license_no',
+      ]
+
       staff.forEach((data) => {
         const rowValues = fields.map((header: string) => {
           if (header === 'staff_role') {
             const role = staffRoles.find((role) => role.id === data.staff_role_id)
             return role ? role.role : ''
           }
-          return data[header] || ''
+          if (header === 'department') {
+            return data.department || data.department_name || ''
+          }
+          if (header === 'teacher_code') {
+            return data.teacher_code || data.ayush_teacher_code || ''
+          }
+          if (header === 'ayush_registration_no') {
+            return data.ayush_registration_no || data.ayush_id_no || ''
+          }
+          if (header === 'uni_approval_number') {
+            return data.uni_approval_number || data.uni_approval_no || data.university_approval_letter_no || ''
+          }
+          if (header === 'uni_approval_date') {
+            return data.uni_approval_date || data.university_approval_date || ''
+          }
+          if (header === 'emergency_contact_number') {
+            return data.emergency_contact_number || ''
+          }
+
+          const val = data[header]
+          if (val === null || val === undefined || val === '') {
+            return ''
+          }
+
+          if (dateFields.includes(header)) {
+            if (val instanceof Date) {
+              const y = val.getUTCFullYear()
+              const m = String(val.getUTCMonth() + 1).padStart(2, '0')
+              const d = String(val.getUTCDate()).padStart(2, '0')
+              return `${y}-${m}-${d}`
+            }
+            if (typeof val === 'string' && val.trim()) {
+              const d = new Date(val)
+              if (!isNaN(d.getTime())) {
+                const y = d.getFullYear()
+                const m = String(d.getMonth() + 1).padStart(2, '0')
+                const day = String(d.getDate()).padStart(2, '0')
+                return `${y}-${m}-${day}`
+              }
+            }
+            return String(val)
+          }
+
+          if (textFields.includes(header)) {
+            return String(val).trim()
+          }
+
+          return val
         })
         worksheet.addRow(rowValues)
       })

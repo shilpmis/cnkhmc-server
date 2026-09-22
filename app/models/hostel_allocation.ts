@@ -8,16 +8,16 @@ export default class HostelAllocation extends BaseModel {
   @column({ isPrimary: true })
   declare id: number
 
-  @column()
+  @column({ columnName: 'student_id' })
   declare studentId: number
 
-  @column()
+  @column({ columnName: 'bed_id' })
   declare bedId: number
 
-  @column.dateTime()
+  @column.dateTime({ columnName: 'allocation_date' })
   declare allocationDate: DateTime
 
-  @column.dateTime()
+  @column.dateTime({ columnName: 'vacation_date' })
   declare vacationDate: DateTime | null
 
   @column()
@@ -32,6 +32,6 @@ export default class HostelAllocation extends BaseModel {
   @belongsTo(() => Student, { foreignKey: 'studentId' })
   declare student: BelongsTo<typeof Student>
 
-  @belongsTo(() => HostelBed)
+  @belongsTo(() => HostelBed, { foreignKey: 'bedId' })
   declare bed: BelongsTo<typeof HostelBed>
 }

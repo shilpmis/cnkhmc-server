@@ -13,12 +13,16 @@ export default class HostelAllocationsController {
     const trx = await db.transaction()
     try {
       const payload = request.only(['student_id', 'bed_id', 'allocation_date'])
-      if (!payload.student_id || !payload.bed_id) {
-         return response.badRequest({ message: 'student_id and bed_id are required' })
+      const studentId = Number(payload.student_id)
+      const bedId = Number(payload.bed_id)
+
+      if (!studentId || !bedId) {
+        await trx.rollback()
+        return response.badRequest({ message: 'student_id and bed_id are required' })
       }
 
       // Check if bed is available
-      const bed = await HostelBed.findOrFail(payload.bed_id, { client: trx })
+      const bed = await HostelBed.findOrFail(bedId, { client: trx })
       if (bed.status !== 'Available') {
         await trx.rollback()
         return response.badRequest({ message: 'Bed is not available' })
@@ -26,7 +30,7 @@ export default class HostelAllocationsController {
 
       // Check if student already has an active allocation
       const existingAllocation = await HostelAllocation.query({ client: trx })
-        .where('studentId', payload.student_id)
+        .where('student_id', studentId)
         .where('status', 'Active')
         .first()
 
@@ -35,33 +39,51 @@ export default class HostelAllocationsController {
         return response.badRequest({ message: 'Student already has an active hostel allocation' })
       }
 
+      // Safe date parsing
+      let allocDate = DateTime.now()
+      if (payload.allocation_date) {
+        const parsed = DateTime.fromISO(String(payload.allocation_date))
+        if (parsed.isValid) {
+          allocDate = parsed
+        }
+      }
+
       // Create allocation
-      const allocation = await HostelAllocation.create({
-        studentId: payload.student_id,
-        bedId: payload.bed_id,
-        allocationDate: payload.allocation_date ? DateTime.fromISO(payload.allocation_date) : DateTime.now(),
-        status: 'Active',
-      }, { client: trx })
+      const allocation = await HostelAllocation.create(
+        {
+          studentId: studentId,
+          bedId: bedId,
+          allocationDate: allocDate,
+          status: 'Active',
+        },
+        { client: trx }
+      )
 
       // Update bed status
       bed.status = 'Occupied'
+      bed.useTransaction(trx)
       await bed.save()
-
-      await allocation.load('student')
-      await allocation.load('bed', (bedQuery: any) => {
-        bedQuery.preload('room', (roomQuery: any) => {
-          roomQuery.preload('hostel')
-        })
-      })
 
       await trx.commit()
 
+      // Load relations outside transaction safely
+      try {
+        await allocation.load('student')
+        await allocation.load('bed', (bedQuery: any) => {
+          bedQuery.preload('room', (roomQuery: any) => {
+            roomQuery.preload('hostel')
+          })
+        })
+      } catch (loadError) {
+        console.warn('Could not preload relations on allocation:', loadError)
+      }
+
       return response.created(allocation)
-    } catch (error) {
+    } catch (error: any) {
       await trx.rollback()
-      console.error(error)
+      console.error('Error allocating bed:', error)
       return response.internalServerError({ 
-        message: 'Error allocating bed', 
+        message: error?.message || 'Error allocating bed', 
         error: error instanceof Error ? error.message : error,
         stack: error instanceof Error ? error.stack : undefined
       })
@@ -79,23 +101,35 @@ export default class HostelAllocationsController {
       }
 
       const payload = request.only(['vacation_date'])
+      let vacDate = DateTime.now()
+      if (payload.vacation_date) {
+        const parsed = DateTime.fromISO(String(payload.vacation_date))
+        if (parsed.isValid) {
+          vacDate = parsed
+        }
+      }
 
       allocation.status = 'Vacated'
-      allocation.vacationDate = payload.vacation_date ? DateTime.fromISO(payload.vacation_date) : DateTime.now()
+      allocation.vacationDate = vacDate
+      allocation.useTransaction(trx)
       await allocation.save()
 
       // Update bed status
       const bed = await HostelBed.findOrFail(allocation.bedId, { client: trx })
       bed.status = 'Available'
+      bed.useTransaction(trx)
       await bed.save()
 
       await trx.commit()
 
       return response.ok(allocation)
-    } catch (error) {
+    } catch (error: any) {
       await trx.rollback()
-      console.error(error)
-      return response.internalServerError({ message: 'Error vacating bed', error })
+      console.error('Error vacating bed:', error)
+      return response.internalServerError({ 
+        message: error?.message || 'Error vacating bed', 
+        error: error instanceof Error ? error.message : error 
+      })
     }
   }
 }

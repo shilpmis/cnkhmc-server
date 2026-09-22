@@ -58,6 +58,7 @@ import ExamSubjectsController from '#controllers/exam_subjects_controller'
 import PoliciesController from '#controllers/policies_controller'
 import AdmissionsController from '#controllers/AdmissionController'
 import StaffCertificatesController from '#controllers/StaffCertificatesController'
+import StudentCertificatesController from '#controllers/StudentCertificatesController'
 
 router.get('/', async () => {
   return { status: 'ok', message: 'Server is running' }
@@ -549,13 +550,17 @@ router
     router.post('hostels/allocations', [HostelAllocationsController, 'allocate'])
     router.put('hostels/allocations/:id/vacate', [HostelAllocationsController, 'vacate'])
 
-    // Certificate Templates
+    // Certificate Templates & Generation
     router.get('certificate-templates', [CertificateTemplatesController, 'index'])
     router.post('certificate-templates', [CertificateTemplatesController, 'store'])
     router.get('certificate-templates/:id', [CertificateTemplatesController, 'show'])
     router.put('certificate-templates/:id', [CertificateTemplatesController, 'update'])
     router.delete('certificate-templates/:id', [CertificateTemplatesController, 'destroy'])
     router.get('certificate-templates/0/generate/:student_id', [CertificateTemplatesController, 'generate'])
+
+    // Student Certificates Generation & Audit Logs
+    router.post('students/:student_id/certificates/generate', [StudentCertificatesController, 'generateAndUpload'])
+    router.get('students/:student_id/certificates/audit-logs', [StudentCertificatesController, 'getAuditLogs'])
 
     // Exam Management
     router.get('exam-masters', [ExamMastersController, 'index'])

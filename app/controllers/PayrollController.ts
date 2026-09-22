@@ -607,30 +607,28 @@ export default class PayrollController {
     const school_id = ctx.auth.user!.school_id
     const staff_id = ctx.params.staff_id
 
-    let active_academic_seesion = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('school_id', school_id as number)
-      .andWhere('is_active', true)
-      .first()
-
-    if (!active_academic_seesion) {
-      return ctx.response.status(422).json({ message: 'Academic session is not active' })
-    }
-
     let staff_enrollment = await StaffEnrollment.query()
       .where('staff_id', staff_id as number)
-      .andWhere('academic_year', active_academic_seesion!.id)
+      .where('school_id', school_id as number)
+      .orderBy('academic_year', 'desc')
       .first()
+
+    if (!staff_enrollment) {
+      staff_enrollment = await StaffEnrollment.query()
+        .where('staff_id', staff_id as number)
+        .orderBy('academic_year', 'desc')
+        .first()
+    }
 
     if (!staff_enrollment) {
       return ctx.response.status(404).json({ message: 'Staff enrollment not found' })
     }
 
     let salary_template = await StaffSalaryTemplates.query()
-      .preload('template_components')
-      .preload('base_template', (query) => {
-        query.preload('template_components')
+      .preload('template_components', (query) => {
+        query.preload('salary_component')
       })
-      // .where('school_id', school_id as number)
+      .preload('base_template')
       .where('staff_enrollments_id', staff_enrollment.id)
       .first()
 
