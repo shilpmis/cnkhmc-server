@@ -80,6 +80,12 @@ export default class Staff extends Base {
 
   @column()
   declare qualification_university: string | null
+
+  @column()
+  declare reporting_to_staff_id: number | null
+
+  @column()
+  declare caliber_level: number | null
   // --- End migration-added columns ---
 
   @column()
@@ -429,4 +435,10 @@ export default class Staff extends Base {
     foreignKey: 'leave_template_id',
   })
   declare leave_template: BelongsTo<typeof LeaveTemplate>
+
+  @belongsTo(() => Staff, {
+    localKey: 'id',
+    foreignKey: 'reporting_to_staff_id',
+  })
+  declare reporting_manager: BelongsTo<typeof Staff>
 }

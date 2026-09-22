@@ -126,7 +126,6 @@ export default class UsersController {
     const staff = await Staff.query()
       .preload('school')
       .where('id', payload.staff_id)
-      .andWhere('is_teching_staff', true)
       .andWhere('school_id', ctx.auth.user!.school_id as number)
       .first()
 
@@ -138,6 +137,7 @@ export default class UsersController {
 
     const trx = await db.transaction()
     try {
+      const branchCode = staff.school?.branch_code || 'school'
       const user = await User.create(
         {
           staff_id: payload.staff_id,
@@ -147,7 +147,7 @@ export default class UsersController {
           role_id: 6,
           name: staff.first_name + ' ' + staff.last_name,
           username: payload.username,
-          email: `${staff.first_name.toLowerCase()}-${staff.last_name.toLowerCase()}@${staff.school.branch_code}.saral`,
+          email: `${staff.first_name.toLowerCase()}-${staff.last_name.toLowerCase()}@${branchCode}.saral`,
         },
         { client: trx }
       )

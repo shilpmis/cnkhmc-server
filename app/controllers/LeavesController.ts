@@ -2,6 +2,7 @@ import LeaveLog from '#models/LeaveLog'
 import LeavePolicies from '#models/LeavePolicies'
 import LeaveTypeMaster from '#models/LeaveTypeMaster'
 import Staff from '#models/Staff'
+import LeaveApprovalHierarchy from '#models/LeaveApprovalHierarchy'
 import StaffLeaveApplication from '#models/StaffLeaveApplication'
 import StaffLeaveBalance from '#models/StaffLeaveBalance'
 import CompOffRequest from '#models/CompOffRequest'
@@ -1022,7 +1023,6 @@ export default class LeavesController {
     const status = ctx.request.input('status', 'pending')
     const date = ctx.request.input('date', null)
     const page = ctx.request.input('page', 1)
-    const today = new Date().toISOString().split('T')[0]
     // const search_term = ctx.request.input('search', '')
 
     let academic_year = ctx.request.input('academic_year')
@@ -1036,8 +1036,8 @@ export default class LeavesController {
     let query = db.query()
       .from('staff_leave_applications')
       .select(
+        'staff_leave_applications.id as id',
         'staff_leave_applications.uuid',
-        // 'staff_leave_applications.staff_id',
         'staff_leave_applications.leave_type_id',
         'staff_leave_applications.academic_year as academic_session_id',
         'staff_leave_applications.approved_by',
@@ -1051,7 +1051,8 @@ export default class LeavesController {
         'staff_leave_applications.total_hour',
         'staff_leave_applications.reason',
         'staff_leave_applications.status',
-        'staff_role_master.*',
+        'staff_role_master.role',
+        'staff_role_master.is_teaching_role',
         'leave_types_master.leave_type_name',
         'staff.id as staff_id',
         'staff.first_name',
@@ -1060,26 +1061,76 @@ export default class LeavesController {
         'staff.email'
       )
       .join('staff', 'staff.id', 'staff_leave_applications.staff_id')
-      .join('staff_role_master', 'staff_role_master.id', 'staff.staff_role_id')
+      .leftJoin('staff_role_master', 'staff_role_master.id', 'staff.staff_role_id')
       .join('leave_types_master', 'leave_types_master.id', 'staff_leave_applications.leave_type_id')
-      .where('staff.school_id', ctx.auth.user!.school_id as number)
-      .andWhere('staff.is_active', true)
-      .andWhere('staff_role_master.is_teaching_role', staff_type === 'teaching')
-      .andWhere('staff_leave_applications.academic_year', academic_year);
+      .where('staff.school_id', ctx.auth.user!.school_id as number);
 
-    // Apply role-based visibility rules
+    if (academic_year && academic_year !== 'all') {
+      query.andWhere((q) => {
+        q.where('staff_leave_applications.academic_year', academic_year)
+          .orWhere('staff_leave_applications.academic_year', String(academic_year))
+      })
+    }
+
+    if (staff_type === 'teaching') {
+      query.andWhere((q) => {
+        q.where('staff_role_master.is_teaching_role', 1)
+      })
+    } else if (staff_type === 'non-teaching' || staff_type === 'other') {
+      query.andWhere((q) => {
+        q.where('staff_role_master.is_teaching_role', 0).orWhereNull('staff_role_master.is_teaching_role')
+      })
+    }
+
+    // Apply role and caliber-based visibility rules
     const userRole = ctx.auth.user!.role_id
-    if (userRole === 9) { // HOD
-      // HODs see leaves of teachers (Role 6)
-      query.andWhere('staff.staff_role_id', 6)
-    } else if (userRole === 2) { // Principal
-      // Principals see leaves of teachers (6) and HODs (9)
-      query.andWhereIn('staff.staff_role_id', [6, 9, 3, 4, 5])
-    } else if (userRole === 1) { // Admin
-      // Admins see everything, including Principals (2)
-    } else if (userRole === 3) { // Head Teacher
-      // Head Teachers see only Teachers (6)
-      query.andWhere('staff.staff_role_id', 6)
+    const userStaffId = ctx.auth.user!.staff_id
+    const adminRoles = [1, 7, 8, 11]
+
+    if (!adminRoles.includes(userRole)) {
+      let currentStaff: Staff | null = null
+      if (userStaffId) {
+        currentStaff = await Staff.query().where('id', userStaffId).first()
+      }
+      const myCaliber = currentStaff?.caliber_level ?? (userRole === 2 ? 2 : 4)
+
+      query.andWhere((subQ) => {
+        let hasCondition = false
+
+        // 1. Direct reportees (explicitly assigned to this manager)
+        if (userStaffId) {
+          subQ.where('staff.reporting_to_staff_id', userStaffId)
+          hasCondition = true
+        }
+
+        // 2. Caliber & Department-based reporting hierarchy
+        if (myCaliber <= 2 || userRole === 2) {
+          // Executive / Principal caliber: sees subordinate staff below level 2
+          const execCond = (q: any) => {
+            q.where('staff.caliber_level', '>', 2)
+              .orWhereNull('staff.caliber_level')
+          }
+          if (hasCondition) subQ.orWhere(execCond)
+          else { subQ.where(execCond); hasCondition = true; }
+        } else if (myCaliber === 3 || userRole === 3 || userRole === 9) {
+          // Department Head (HOD): sees staff in THEIR department of lower caliber (> 3)
+          if (currentStaff?.department_id) {
+            const deptCond = (deptQ: any) => {
+              deptQ.where('staff.department_id', currentStaff!.department_id)
+                .andWhere((calQ: any) => {
+                  calQ.where('staff.caliber_level', '>', 3).orWhereNull('staff.caliber_level')
+                })
+            }
+            if (hasCondition) subQ.orWhere(deptCond)
+            else { subQ.where(deptCond); hasCondition = true; }
+          }
+        }
+
+        // Fallback: If no staff_id or reporting match, return empty result set for non-approvers
+        if (!hasCondition) {
+          subQ.whereRaw('1 = 0')
+        }
+      })
     }
 
     // Apply status filter if not 'all'
@@ -1090,11 +1141,6 @@ export default class LeavesController {
     // Apply date filter if date is provided
     if (date) {
       query.andWhereRaw('? BETWEEN DATE(from_date) AND DATE(to_date)', [date]);
-    } else {
-      // If no date, filter for current or future applications (unless status is 'all')
-      if (status !== 'all') {
-        query.andWhereRaw('? <= DATE(to_date)', [today]);
-      }
     }
 
     try {
@@ -1134,35 +1180,65 @@ export default class LeavesController {
       })
     }
 
-    // Check if user has permission to approve based on the hierarchy
+    // Check if user has permission to approve based on the hierarchy and caliber
     const approverRole = ctx.auth.user!.role_id
+    const approverStaffId = ctx.auth.user!.staff_id
     const applicantRole = staff.staff_role_id
+    const applicantCaliber = staff.caliber_level ?? 4
 
     let isAuthorized = false
-    const adminRoles = [1, 7, 8, 11]; // Includes Admin, SuperAdmin, etc.
+    const adminRoles = [1, 7, 8, 11] // Includes Admin, SuperAdmin, etc.
 
-    // Hierarchy Rules:
-    // 1. Teacher (Role 6) -> HOD (Role 9), Principal (Role 2), Admin (Role 1)
-    // 2. HOD (Role 9) -> Principal (Role 2), Admin (Role 1)
-    // 3. Principal (Role 2) -> Admin (Role 1)
-    // 4. Others (Clerks, etc.) -> Admin, Principal
+    let approverStaff: Staff | null = null
+    if (approverStaffId) {
+      approverStaff = await Staff.query().where('id', approverStaffId).first()
+    }
+    const approverCaliber = approverStaff?.caliber_level ?? (adminRoles.includes(approverRole) ? 1 : approverRole === 2 ? 2 : approverRole === 9 || approverRole === 3 ? 3 : 5)
 
-    if (adminRoles.includes(approverRole)) {
-      isAuthorized = true; // Admins can approve anything
-    } else if (applicantRole === 6) { // Teacher
-      if ([2, 9].includes(approverRole)) isAuthorized = true // Principal, HOD
-    } else if (applicantRole === 9) { // HOD
-      if ([2].includes(approverRole)) isAuthorized = true // Principal
-    } else if (applicantRole === 2) { // Principal
-      // Already covered by adminRoles check above
-    } else {
-      // For other roles, Principal can approve
-      if ([2].includes(approverRole)) isAuthorized = true
+    // 1. Admins / Caliber 1 can approve anything
+    if (adminRoles.includes(approverRole) || approverCaliber === 1) {
+      isAuthorized = true
+    }
+    // 2. Direct Reporting Manager
+    else if (staff.reporting_to_staff_id && approverStaffId && Number(staff.reporting_to_staff_id) === Number(approverStaffId)) {
+      isAuthorized = true
+    }
+    // 3. Principal / Caliber 2 can approve any subordinate
+    else if (approverCaliber === 2 || approverRole === 2) {
+      if (applicantCaliber > 2 || [3, 4, 5, 6, 7, 8, 9, 10].includes(applicantRole)) {
+        isAuthorized = true
+      }
+    }
+    // 4. HOD / Caliber 3 can approve department staff or teachers
+    else if (approverCaliber === 3 || approverRole === 9 || approverRole === 3) {
+      if (approverStaff?.department_id && staff.department_id && approverStaff.department_id === staff.department_id) {
+        if (applicantCaliber > 3) isAuthorized = true
+      } else if (!staff.department_id && applicantRole === 6) {
+        isAuthorized = true
+      }
+    }
+
+    // 5. Check dynamic leave_approval_hierarchies rules
+    if (!isAuthorized) {
+      const hierarchyRules = await LeaveApprovalHierarchy.query()
+        .where('school_id', staff.school_id)
+        .andWhere('is_active', true)
+
+      for (const rule of hierarchyRules) {
+        const applicantMatch = !rule.applicant_role_id || rule.applicant_role_id === applicantRole
+        const approverMatch = (!rule.approver_role_id || (approverStaff?.staff_role_id && rule.approver_role_id === approverStaff.staff_role_id)) || approverCaliber <= rule.min_approver_caliber
+        const deptMatch = !rule.require_same_department || (approverStaff?.department_id && staff.department_id && approverStaff.department_id === staff.department_id)
+
+        if (applicantMatch && approverMatch && deptMatch) {
+          isAuthorized = true
+          break
+        }
+      }
     }
 
     if (!isAuthorized) {
       return ctx.response.status(403).json({
-        message: 'You are not authorized to approve this leave application based on the hierarchy',
+        message: 'You are not authorized to approve this leave application. Only higher caliber authorities or assigned reporting managers can approve.',
       })
     }
 
@@ -1306,6 +1382,117 @@ export default class LeavesController {
       .andWhere('academic_year', academicYear)
 
     return leaveBalances
+  }
+
+  async getApplicablePoliciesForStaff(
+    staff: Staff,
+    schoolId: number,
+    academicYear: number
+  ): Promise<LeavePolicies[]> {
+    const existingBalances = await StaffLeaveBalance.query()
+      .where('staff_id', staff.id)
+      .andWhere('academic_year', academicYear)
+
+    const basePolicyQuery = () =>
+      LeavePolicies.query()
+        .preload('leave_type')
+        .preload('staff_role')
+        .where('school_id', schoolId)
+        .andWhere('academic_year', academicYear)
+
+    let candidatePolicies: LeavePolicies[] = []
+
+    if (existingBalances.length > 0) {
+      const leaveTypeIds = existingBalances.map((b) => b.leave_type_id)
+      const rawPolicies = await basePolicyQuery().whereIn('leave_type_id', leaveTypeIds)
+      const applicableRaw = rawPolicies.filter((p) => this.isPolicyApplicableToStaff(p, staff))
+
+      const policyMap = new Map<number, LeavePolicies>()
+      for (const p of applicableRaw) {
+        const existing = policyMap.get(p.leave_type_id)
+        if (!existing) {
+          policyMap.set(p.leave_type_id, p)
+        } else {
+          if (p.leave_template_id && !existing.leave_template_id) {
+            policyMap.set(p.leave_type_id, p)
+          } else if (p.staff_role_id && !existing.staff_role_id && !existing.leave_template_id) {
+            policyMap.set(p.leave_type_id, p)
+          }
+        }
+      }
+      candidatePolicies = Array.from(policyMap.values())
+
+      if (candidatePolicies.length > 0) {
+        return candidatePolicies
+      }
+    }
+
+    if (staff.leave_template_id) {
+      candidatePolicies = await basePolicyQuery()
+        .where('leave_template_id', staff.leave_template_id)
+        .orderBy('id', 'desc')
+    }
+
+    if (candidatePolicies.length === 0 && staff.staff_role_id) {
+      candidatePolicies = await basePolicyQuery()
+        .where('staff_role_id', staff.staff_role_id)
+        .orderBy('id', 'desc')
+    }
+
+    if (candidatePolicies.length === 0) {
+      const typeStr = (staff.staff_type || '').toLowerCase()
+      const isNonVacational = typeStr.includes('non vact') || typeStr.includes('non-vact') || typeStr.includes('non vacat') || typeStr.includes('non-vacat')
+      const isVacational = !isNonVacational && (typeStr.includes('vact') || typeStr.includes('vacat'))
+      const isHospital = typeStr.includes('hosp')
+      const isNonTeaching = !isHospital && (typeStr.includes('non-teach') || typeStr.includes('non teach'))
+
+      candidatePolicies = await basePolicyQuery()
+        .whereNull('staff_role_id')
+        .whereNull('leave_template_id')
+        .where((q) => {
+          if (isNonVacational) {
+            q.whereIn('applicable_staff_type', ['Non Vactional Teaching', 'Non-Vacational Teaching', 'Teaching Staff'])
+              .orWhereNull('applicable_staff_type')
+          } else if (isVacational) {
+            q.whereIn('applicable_staff_type', ['Vactional Staff Teaching', 'Vacational Staff Teaching', 'Teaching Staff'])
+              .orWhereNull('applicable_staff_type')
+          } else if (isNonTeaching) {
+            q.whereIn('applicable_staff_type', ['Non-Teaching', 'Non-Teaching Staff'])
+              .orWhereNull('applicable_staff_type')
+          } else if (isHospital) {
+            q.whereIn('applicable_staff_type', ['Hospital Staff'])
+              .orWhereNull('applicable_staff_type')
+          } else if (typeStr.includes('teach')) {
+            q.whereIn('applicable_staff_type', ['Vactional Staff Teaching', 'Vacational Staff Teaching', 'Non Vactional Teaching', 'Non-Vacational Teaching', 'Teaching Staff'])
+              .orWhereNull('applicable_staff_type')
+          } else if (staff.staff_type) {
+            q.where('applicable_staff_type', staff.staff_type).orWhereNull('applicable_staff_type')
+          } else {
+            q.whereNull('applicable_staff_type')
+          }
+        })
+        .orderBy('id', 'desc')
+    }
+
+    candidatePolicies = candidatePolicies.filter((policy) => this.isPolicyApplicableToStaff(policy, staff))
+
+    for (const policy of candidatePolicies) {
+      const existing = existingBalances.find((b) => b.leave_type_id === policy.leave_type_id)
+      if (!existing) {
+        await StaffLeaveBalance.create({
+          staff_id: staff.id,
+          leave_type_id: policy.leave_type_id,
+          academic_year: academicYear,
+          total_leaves: policy.annual_quota,
+          used_leaves: 0,
+          pending_leaves: 0,
+          carried_forward: 0,
+          available_balance: policy.annual_quota,
+        })
+      }
+    }
+
+    return candidatePolicies
   }
 
   async fetchStaffLeaveBalances(ctx: HttpContext) {
@@ -2018,6 +2205,13 @@ export default class LeavesController {
   async fetchTeachersLeaveSummaryReport(ctx: HttpContext) {
     try {
       const user = ctx.auth.user!
+      const role_id = Number(user.role_id)
+      if (![1, 2, 7, 8, 11].includes(role_id)) {
+        return ctx.response.status(403).json({
+          message: 'Access denied. Leave reports are only accessible to Admin or Super Admin users.',
+        })
+      }
+
       const school_id = user.school_id || 1
       const academic_year = ctx.request.input('academic_year')
       const staff_type = ctx.request.input('type', 'all') // 'all' | 'teaching' | 'non-teaching' | 'hospital'
@@ -2089,88 +2283,108 @@ export default class LeavesController {
         approvedUsageMap.set(`${row.staff_id}-${row.leave_type_id}`, Number(row.total_used) || 0)
       })
 
-      const summary = staffList.map((st) => {
-        const staffBalances = balancesByStaff.get(st.id) || []
+      const summary = await Promise.all(
+        staffList.map(async (st) => {
+          const staffBalances = balancesByStaff.get(st.id) || []
 
-        let totalTaken = 0
-        let totalAvailable = 0
-        const leaveBreakdown: Record<string, { used: number; total: number; available: number }> = {}
+          let stApplicableLeaveTypeIds: Set<number>
+          if (staffBalances.length > 0) {
+            const leaveTypeIds = staffBalances.map((b) => b.leave_type_id)
+            const rawPolicies = allPolicies.filter((p) => leaveTypeIds.includes(p.leave_type_id))
+            const applicableRaw = rawPolicies.filter((p) => this.isPolicyApplicableToStaff(p, st))
+            stApplicableLeaveTypeIds = new Set(applicableRaw.map((p) => p.leave_type_id))
+            if (stApplicableLeaveTypeIds.size === 0) {
+              stApplicableLeaveTypeIds = new Set(leaveTypeIds)
+            }
+          } else {
+            const applicablePolicies = await this.getApplicablePoliciesForStaff(
+              st,
+              school_id,
+              Number(academic_year) || new Date().getFullYear()
+            )
+            stApplicableLeaveTypeIds = new Set(applicablePolicies.map((p) => p.leave_type_id))
+          }
 
-        leaveTypes.forEach((lt) => {
-          const bal = staffBalances.find((b) => b.leave_type_id === lt.id)
-          const actualApproved = approvedUsageMap.get(`${st.id}-${lt.id}`) || 0
+          let totalTaken = 0
+          let totalAvailable = 0
+          const leaveBreakdown: Record<string, { used: number; total: number; available: number }> = {}
 
-          let used = 0
-          let total = 0
-          let available = 0
-          let pending = 0
+          leaveTypes.forEach((lt) => {
+            const bal = staffBalances.find((b) => b.leave_type_id === lt.id)
+            const actualApproved = approvedUsageMap.get(`${st.id}-${lt.id}`) || 0
+            const isApplicable = stApplicableLeaveTypeIds.has(lt.id)
 
-          const matchingPolicies = allPolicies.filter((p) => p.leave_type_id === lt.id)
-          const isApplicable = matchingPolicies.length === 0 || matchingPolicies.some((p) => this.isPolicyApplicableToStaff(p, st))
+            let used = 0
+            let total = 0
+            let available = 0
+            let pending = 0
 
-          if (bal) {
-            const dbUsed = Number(bal.used_leaves) || 0
-            used = Math.max(dbUsed, actualApproved)
-            if (isApplicable) {
-              total = Number(bal.total_leaves) || 0
-              pending = Number(bal.pending_leaves) || 0
-              available = Number(bal.available_balance)
-              if (available <= 0 && used < total) {
-                available = Math.max(0, this.formatDecimalValue(total - used - pending))
+            if (bal) {
+              const dbUsed = Number(bal.used_leaves) || 0
+              used = Math.max(dbUsed, actualApproved)
+              if (isApplicable) {
+                total = Number(bal.total_leaves) || 0
+                pending = Number(bal.pending_leaves) || 0
+                available = Number(bal.available_balance)
+                if (available <= 0 && used < total) {
+                  available = Math.max(0, this.formatDecimalValue(total - used - pending))
+                }
+              } else {
+                total = used
+                available = 0
               }
-            } else {
-              // Obsolete/mismatched leave balance for this staff member
-              total = used
-              available = 0
-            }
-          } else if (isApplicable) {
-            // Only match policy if it explicitly matches st.leave_template_id or st.staff_role_id or st.staff_type
-            let policy = matchingPolicies.find((p) => st.leave_template_id && p.leave_template_id === st.leave_template_id)
-            if (!policy && st.staff_role_id) {
-              policy = matchingPolicies.find((p) => p.staff_role_id === st.staff_role_id)
-            }
-            if (!policy) {
-              policy = matchingPolicies.find((p) => this.isPolicyApplicableToStaff(p, st))
-            }
+            } else if (isApplicable) {
+              let policy = allPolicies.find(
+                (p) => p.leave_type_id === lt.id && st.leave_template_id && p.leave_template_id === st.leave_template_id
+              )
+              if (!policy && st.staff_role_id) {
+                policy = allPolicies.find((p) => p.leave_type_id === lt.id && p.staff_role_id === st.staff_role_id)
+              }
+              if (!policy) {
+                policy = allPolicies.find((p) => p.leave_type_id === lt.id && this.isPolicyApplicableToStaff(p, st))
+              }
 
-            if (policy) {
-              used = actualApproved
-              total = Number(policy.annual_quota) || 0
-              available = Math.max(0, total - used)
+              if (policy) {
+                used = actualApproved
+                total = Number(policy.annual_quota) || 0
+                available = Math.max(0, total - used)
+              } else if (actualApproved > 0) {
+                used = actualApproved
+                total = used
+                available = 0
+              }
             } else if (actualApproved > 0) {
               used = actualApproved
               total = used
               available = 0
             }
-          } else if (actualApproved > 0) {
-            used = actualApproved
-            total = used
-            available = 0
+
+            if (isApplicable) {
+              totalTaken += used
+              totalAvailable += available
+            }
+
+            leaveBreakdown[lt.leave_type_name] = { used, total, available }
+          })
+
+          return {
+            staff_id: st.id,
+            first_name: st.first_name,
+            middle_name: st.middle_name,
+            last_name: st.last_name,
+            full_name: `${st.first_name} ${st.last_name}`.trim(),
+            employee_id: st.employee_code || (st as any).employee_id || (st as any).staff_code || `ST-${st.id}`,
+            role: st.role_type?.role || 'Staff',
+            staff_type: st.staff_type || (st.is_teaching_role ? 'Teaching' : 'Non-Teaching'),
+            staff_category: st.staff_category || 'N/A',
+            designation: st.designation || 'N/A',
+            department: typeof st.department === 'string' && st.department.trim() ? st.department : st.department_details?.name || 'N/A',
+            total_leaves_taken: totalTaken,
+            total_leaves_available: totalAvailable,
+            leave_breakdown: leaveBreakdown,
           }
-
-          totalTaken += used
-          totalAvailable += available
-
-          leaveBreakdown[lt.leave_type_name] = { used, total, available }
         })
-
-        return {
-          staff_id: st.id,
-          first_name: st.first_name,
-          middle_name: st.middle_name,
-          last_name: st.last_name,
-          full_name: `${st.first_name} ${st.last_name}`.trim(),
-          employee_id: st.employee_code || (st as any).employee_id || (st as any).staff_code || `ST-${st.id}`,
-          role: st.role_type?.role || 'Staff',
-          staff_type: st.staff_type || (st.is_teaching_role ? 'Teaching' : 'Non-Teaching'),
-          staff_category: st.staff_category || 'N/A',
-          designation: st.designation || 'N/A',
-          department: typeof st.department === 'string' && st.department.trim() ? st.department : st.department_details?.name || 'N/A',
-          total_leaves_taken: totalTaken,
-          total_leaves_available: totalAvailable,
-          leave_breakdown: leaveBreakdown,
-        }
-      })
+      )
 
       return ctx.response.status(200).json({
         leave_types: leaveTypes.map((lt) => ({ id: lt.id, name: lt.leave_type_name })),
@@ -2183,6 +2397,14 @@ export default class LeavesController {
 
   async fetchIndividualTeacherLeaveReport(ctx: HttpContext) {
     try {
+      const user = ctx.auth.user!
+      const role_id = Number(user.role_id)
+      if (![1, 2, 7, 8, 11].includes(role_id)) {
+        return ctx.response.status(403).json({
+          message: 'Access denied. Leave reports are only accessible to Admin or Super Admin users.',
+        })
+      }
+
       const staff_id = ctx.params.staff_id
       const academic_year = ctx.request.input('academic_year')
       if (!staff_id) {
@@ -2322,6 +2544,306 @@ export default class LeavesController {
     }
 
     return policyAppTypeLower === staffTypeLower
+  }
+
+  /**
+   * Fetch configured hierarchy rules and caliber definitions for school
+   */
+  async indexApprovalHierarchy(ctx: HttpContext) {
+    const school_id = ctx.auth.user!.school_id!
+    const academic_year = ctx.request.input('academic_year')
+
+    let query = LeaveApprovalHierarchy.query()
+      .where('school_id', school_id)
+      .preload('applicant_role')
+      .preload('approver_role')
+      .preload('department')
+      .orderBy('priority', 'asc')
+      .orderBy('id', 'asc')
+
+    if (academic_year) {
+      query.andWhere((q) => {
+        q.where('academic_year', academic_year).orWhereNull('academic_year')
+      })
+    }
+
+    const rules = await query
+
+    const caliberDefinitions = [
+      { level: 1, name: 'Level 1 - Admin / Management', description: 'Institutional Admins, Super Admins, Directors (Highest Caliber / Super Approver)' },
+      { level: 2, name: 'Level 2 - Executive / Principal', description: 'Principal, Vice-Principal, Medical Superintendent' },
+      { level: 3, name: 'Level 3 - Department Head (HOD)', description: 'Head of Department (HOD), Administrative Officer' },
+      { level: 4, name: 'Level 4 - Faculty / Operational Staff', description: 'Professors, Readers, Lecturers, Clerks, Accountants, Lab Technicians' },
+      { level: 5, name: 'Level 5 - Support Staff', description: 'Peons, Mess Staff, Hostel Staff, Ward Boys' },
+    ]
+
+    return ctx.response.status(200).json({
+      rules,
+      caliber_definitions: caliberDefinitions,
+    })
+  }
+
+  /**
+   * Create or update an approval hierarchy rule
+   */
+  async createOrUpdateHierarchyRule(ctx: HttpContext) {
+    const school_id = ctx.auth.user!.school_id!
+    const body = ctx.request.body()
+
+    const {
+      id,
+      academic_year,
+      applicant_role_id,
+      approver_role_id,
+      department_id,
+      require_same_department = true,
+      min_approver_caliber = 2,
+      priority = 1,
+      is_active = true,
+    } = body
+
+    let rule: LeaveApprovalHierarchy
+
+    if (id) {
+      rule = await LeaveApprovalHierarchy.query()
+        .where('id', id)
+        .andWhere('school_id', school_id)
+        .firstOrFail()
+
+      rule.merge({
+        academic_year: academic_year ? Number(academic_year) : null,
+        applicant_role_id: applicant_role_id ? Number(applicant_role_id) : null,
+        approver_role_id: approver_role_id ? Number(approver_role_id) : null,
+        department_id: department_id ? Number(department_id) : null,
+        require_same_department: Boolean(require_same_department),
+        min_approver_caliber: Number(min_approver_caliber),
+        priority: Number(priority),
+        is_active: Boolean(is_active),
+      })
+      await rule.save()
+    } else {
+      rule = await LeaveApprovalHierarchy.create({
+        school_id,
+        academic_year: academic_year ? Number(academic_year) : null,
+        applicant_role_id: applicant_role_id ? Number(applicant_role_id) : null,
+        approver_role_id: approver_role_id ? Number(approver_role_id) : null,
+        department_id: department_id ? Number(department_id) : null,
+        require_same_department: Boolean(require_same_department),
+        min_approver_caliber: Number(min_approver_caliber),
+        priority: Number(priority),
+        is_active: Boolean(is_active),
+      })
+    }
+
+    await rule.load('applicant_role')
+    await rule.load('approver_role')
+    await rule.load('department')
+
+    return ctx.response.status(200).json({
+      message: `Hierarchy rule ${id ? 'updated' : 'created'} successfully`,
+      data: rule,
+    })
+  }
+
+  /**
+   * Delete an approval hierarchy rule
+   */
+  async deleteHierarchyRule(ctx: HttpContext) {
+    const school_id = ctx.auth.user!.school_id!
+    const rule_id = ctx.params.id
+
+    const rule = await LeaveApprovalHierarchy.query()
+      .where('id', rule_id)
+      .andWhere('school_id', school_id)
+      .firstOrFail()
+
+    await rule.delete()
+
+    return ctx.response.status(200).json({
+      message: 'Hierarchy rule deleted successfully',
+    })
+  }
+
+  /**
+   * Fetch staff members and their hierarchy/approver mappings
+   */
+  async indexStaffHierarchyMappings(ctx: HttpContext) {
+    const school_id = ctx.auth.user!.school_id!
+    const page = Number(ctx.request.input('page', 1))
+    const limit = Number(ctx.request.input('limit', 15))
+    const search = ctx.request.input('search', '').trim()
+    const department_id = ctx.request.input('department_id')
+    const role_id = ctx.request.input('role_id')
+    const caliber_level = ctx.request.input('caliber_level')
+    const has_approver = ctx.request.input('has_approver')
+
+    let query = Staff.query()
+      .where('school_id', school_id)
+      .preload('department_details')
+      .preload('role_type')
+      .preload('reporting_manager', (managerQuery) => {
+        managerQuery.preload('role_type').preload('department_details')
+      })
+      .orderBy('first_name', 'asc')
+
+    if (search) {
+      query.andWhere((q) => {
+        q.whereILike('first_name', `%${search}%`)
+          .orWhereILike('last_name', `%${search}%`)
+          .orWhereILike('employee_code', `%${search}%`)
+          .orWhereILike('email', `%${search}%`)
+      })
+    }
+
+    if (department_id && department_id !== 'all') {
+      query.andWhere('department_id', department_id)
+    }
+
+    if (role_id && role_id !== 'all') {
+      query.andWhere('staff_role_id', role_id)
+    }
+
+    if (caliber_level && caliber_level !== 'all') {
+      query.andWhere('caliber_level', caliber_level)
+    }
+
+    if (has_approver === 'assigned') {
+      query.whereNotNull('reporting_to_staff_id')
+    } else if (has_approver === 'unassigned') {
+      query.whereNull('reporting_to_staff_id')
+    }
+
+    if (ctx.request.input('page') === 'all') {
+      const allStaff = await query
+      return ctx.response.status(200).json(allStaff)
+    }
+
+    const paginatedStaff = await query.paginate(page, limit)
+    return ctx.response.status(200).json(paginatedStaff)
+  }
+
+  /**
+   * Update an individual staff member's direct approver and/or caliber level
+   */
+  async updateStaffApprover(ctx: HttpContext) {
+    const school_id = ctx.auth.user!.school_id!
+    const { staff_id, reporting_to_staff_id, caliber_level } = ctx.request.body()
+
+    if (!staff_id) {
+      return ctx.response.status(400).json({ message: 'staff_id is required' })
+    }
+
+    if (reporting_to_staff_id && Number(staff_id) === Number(reporting_to_staff_id)) {
+      return ctx.response.status(400).json({ message: 'Staff cannot be assigned as their own approver' })
+    }
+
+    const staffMember = await Staff.query()
+      .where('id', staff_id)
+      .andWhere('school_id', school_id)
+      .firstOrFail()
+
+    if (reporting_to_staff_id !== undefined) {
+      staffMember.reporting_to_staff_id = reporting_to_staff_id ? Number(reporting_to_staff_id) : null
+    }
+
+    if (caliber_level !== undefined) {
+      staffMember.caliber_level = caliber_level ? Number(caliber_level) : null
+    }
+
+    await staffMember.save()
+
+    await staffMember.load('department_details')
+    await staffMember.load('role_type')
+    await staffMember.load('reporting_manager')
+
+    return ctx.response.status(200).json({
+      message: 'Staff approver hierarchy updated successfully',
+      data: staffMember,
+    })
+  }
+
+  /**
+   * Bulk assign a direct approver by department, role, or list of staff IDs
+   */
+  async bulkAssignApprover(ctx: HttpContext) {
+    const school_id = ctx.auth.user!.school_id!
+    const { approver_staff_id, department_id, staff_role_id, staff_ids } = ctx.request.body()
+
+    if (!approver_staff_id) {
+      return ctx.response.status(400).json({ message: 'approver_staff_id is required' })
+    }
+
+    let updateQuery = Staff.query()
+      .where('school_id', school_id)
+      .andWhereNot('id', approver_staff_id) // Do not assign manager to themselves
+
+    let conditionsApplied = false
+
+    if (Array.isArray(staff_ids) && staff_ids.length > 0) {
+      updateQuery.whereIn('id', staff_ids)
+      conditionsApplied = true
+    } else {
+      if (department_id && department_id !== 'all') {
+        updateQuery.andWhere('department_id', department_id)
+        conditionsApplied = true
+      }
+      if (staff_role_id && staff_role_id !== 'all') {
+        updateQuery.andWhere('staff_role_id', staff_role_id)
+        conditionsApplied = true
+      }
+    }
+
+    if (!conditionsApplied) {
+      return ctx.response.status(400).json({
+        message: 'Please specify a department, role, or list of staff IDs to bulk assign',
+      })
+    }
+
+    const affected = await updateQuery.update({
+      reporting_to_staff_id: approver_staff_id,
+    })
+
+    return ctx.response.status(200).json({
+      message: `Approver assigned successfully to ${affected} staff members`,
+      count: affected,
+    })
+  }
+
+  /**
+   * Get list of staff who are eligible to be assigned as higher caliber approvers
+   */
+  async getEligibleApprovers(ctx: HttpContext) {
+    const school_id = ctx.auth.user!.school_id!
+
+    const approvers = await Staff.query()
+      .where('school_id', school_id)
+      .andWhere('is_active', true)
+      .where((q) => {
+        // Caliber 1 (Admin), 2 (Principal), 3 (HOD) or any staff with higher roles
+        q.whereIn('caliber_level', [1, 2, 3])
+          .orWhereIn('staff_role_id', (roleQ) => {
+            roleQ.from('staff_role_master').select('id').whereRaw('LOWER(role) LIKE ? OR LOWER(role) LIKE ? OR LOWER(role) LIKE ?', ['%principal%', '%head%', '%hod%'])
+          })
+          .orWhereRaw('LOWER(designation) LIKE ? OR LOWER(designation) LIKE ? OR LOWER(designation) LIKE ?', ['%principal%', '%head%', '%hod%'])
+      })
+      .preload('department_details')
+      .preload('role_type')
+      .orderBy('caliber_level', 'asc')
+      .orderBy('first_name', 'asc')
+
+    // Format clean list
+    const formatted = approvers.map((s) => ({
+      id: s.id,
+      full_name: `${s.first_name || ''} ${s.middle_name || ''} ${s.last_name || ''}`.replace(/\s+/g, ' ').trim(),
+      employee_code: s.employee_code,
+      email: s.email,
+      designation: s.designation || s.role_type?.role || 'Staff',
+      caliber_level: s.caliber_level || 3,
+      department_id: s.department_id,
+      department_name: s.department_details?.name || 'General',
+    }))
+
+    return ctx.response.status(200).json(formatted)
   }
 }
 
