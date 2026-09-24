@@ -461,8 +461,17 @@ router
     router.post('timetable/config/period', [TimeTableController ,'createTimeTableForDivisionForADay'])    
     router.put('timetable/config/period', [TimeTableController ,'updateTimeTableForDivisionForADay'])        
     router.put('timetable/config/period/week', [TimeTableController ,'updateTimeTableForDivisionForWeek'])
+    router.put('timetable/config/period/:period_id', [TimeTableController, 'updateSinglePeriod'])
+    router.delete('timetable/config/period/:period_id', [TimeTableController, 'deleteSinglePeriod'])
     router.delete('timetable/config/period/all/:class_day_config_id', [TimeTableController ,'deleteAllPeriodsForClassDayConfig'])
     router.delete('timetable/config/:school_timetable_config_id/:division_id', [TimeTableController ,'deleteTimeTableForDivision'])
+
+    // Timetable Versions & History
+    router.post('timetable/version', [TimeTableController, 'saveTimetableVersion'])
+    router.get('timetable/version/:division_id', [TimeTableController, 'getTimetableVersions'])
+    router.get('timetable/version/detail/:version_id', [TimeTableController, 'getTimetableVersionDetail'])
+    router.post('timetable/version/restore/:version_id', [TimeTableController, 'restoreTimetableVersion'])
+    router.delete('timetable/version/:version_id', [TimeTableController, 'deleteTimetableVersion'])
 
     // Lesson Plans
     router.get('lesson-plans', [LessonPlanController, 'index'])

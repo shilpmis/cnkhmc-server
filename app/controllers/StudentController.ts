@@ -308,7 +308,7 @@ export default class StundetsController {
       return ctx.response.status(400).json({ message: 'Academic session is required' })
     }
     
-    const is_meta_req = ctx.request.input('student_meta', false) === 'true'
+    const is_meta_req = String(ctx.request.input('student_meta', false)) === 'true' || ctx.request.input('student_meta') === true
 
     if (school_id !== ctx.auth.user?.school_id) {
       return ctx.response
@@ -320,10 +320,17 @@ export default class StundetsController {
 
     try {
       // Fetch the student enrollment record
-      const studentEnrollment = await StudentEnrollments.query()
+      let studentEnrollment = await StudentEnrollments.query()
         .where('student_id', student_id)
         .andWhere('academic_year', acadamic_session_id)
         .first()
+
+      if (!studentEnrollment) {
+        studentEnrollment = await StudentEnrollments.query()
+          .where('student_id', student_id)
+          .orderBy('id', 'desc')
+          .first()
+      }
 
       if (!studentEnrollment) {
         return ctx.response.status(404).json({ message: 'No Student Enrollment Available!' })

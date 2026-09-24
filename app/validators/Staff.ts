@@ -7,6 +7,7 @@ export const CreateValidatorForStaff = vine.compile(
   vine.object({
     remarks: vine.string().trim().minLength(2).maxLength(255).optional(),
     staff_role_id: vine.number(),
+    employee_code: vine.string().trim().maxLength(50).nullable().optional(),
 
     first_name: vine.string().trim().minLength(1).maxLength(50),
     middle_name: vine.string().trim().minLength(1).maxLength(50).nullable().optional(),
@@ -168,6 +169,7 @@ export const UpdateValidatorForStaff = vine.compile(
   vine.object({
     remarks: vine.string().trim().minLength(2).maxLength(255).optional(),
     staff_role_id: vine.number().optional(),
+    employee_code: vine.string().trim().maxLength(50).nullable().optional(),
 
     first_name: vine.string().trim().minLength(1).maxLength(50).optional(),
     middle_name: vine.string().trim().minLength(1).maxLength(50).nullable().optional(),

@@ -4,10 +4,11 @@ import Divisions from '#models/Divisions'
 import LabConfig from '#models/LabConfig'
 import PeriodsConfig from '#models/PeriodsConfig'
 import SchoolTimeTableConfig from '#models/SchoolTimeTableConfig'
-import { CreateValidatorForClassDayConfig, CreateValidatorForLabConfig, CreateValidatorForPeriodConfig, CreateValidatorForSchoolTimeTableConfig, UpdateValidatorForClassDayConfig, UpdateValidatorForLabConfig, UpdateValidatorForPeriodConfig, UpdateValidatorForSchoolTimeTableConfig, ValidatorForCheckPeriodConfig, UpdateValidatorForPeriodConfigWeek } from '#validators/TimeTable'
+import { CreateValidatorForClassDayConfig, CreateValidatorForLabConfig, CreateValidatorForPeriodConfig, CreateValidatorForSchoolTimeTableConfig, UpdateValidatorForClassDayConfig, UpdateValidatorForLabConfig, UpdateValidatorForPeriodConfig, UpdateValidatorForSchoolTimeTableConfig, ValidatorForCheckPeriodConfig, UpdateValidatorForPeriodConfigWeek, UpdateValidatorForSinglePeriodConfig } from '#validators/TimeTable'
 import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db'
 import SubjectDivisionMaster from '#models/SubjectDivisionMaster'
+import TimetableVersion from '#models/timetable_version'
 // @ts-ignore
 import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
@@ -913,6 +914,319 @@ export default class TimeTableController {
       message: 'All periods for this day have been deleted across all divisions',
       removed_count: removedCount
     });
+  }
+
+  async updateSinglePeriod(ctx: HttpContext) {
+    const period_id = ctx.params.period_id || ctx.params.id;
+    const payload = await UpdateValidatorForSinglePeriodConfig.validate(ctx.request.all());
+
+    const period = await PeriodsConfig.find(period_id);
+    if (!period) {
+      return ctx.response.notFound({ message: 'Period not found' });
+    }
+
+    const class_day_config = await ClassDayConfig.find(period.class_day_config_id);
+    if (!class_day_config) {
+      return ctx.response.badRequest({ message: 'Associated Class Day Config not found' });
+    }
+
+    const school_timetable_config = await SchoolTimeTableConfig.find(class_day_config.school_timetable_config_id);
+    if (!school_timetable_config) {
+      return ctx.response.badRequest({ message: 'School Time Table Config not found' });
+    }
+
+    let payload_to_update: any = {};
+    if (payload.period_order !== undefined) payload_to_update.period_order = payload.period_order;
+    if (payload.start_time !== undefined) payload_to_update.start_time = payload.start_time;
+    if (payload.end_time !== undefined) payload_to_update.end_time = payload.end_time;
+    if (payload.subjects_division_masters_id !== undefined) payload_to_update.subjects_division_masters_id = payload.subjects_division_masters_id;
+    if (payload.staff_enrollment_id !== undefined) payload_to_update.staff_enrollment_id = payload.staff_enrollment_id;
+    if (payload.lab_id !== undefined) payload_to_update.lab_id = payload.lab_id;
+    if (payload.is_pt !== undefined) payload_to_update.is_pt = payload.is_pt;
+    if (payload.is_free_period !== undefined) payload_to_update.is_free_period = payload.is_free_period;
+    if (payload.is_library !== undefined) payload_to_update.is_library = payload.is_library;
+    if (payload.is_seminar !== undefined) payload_to_update.is_seminar = payload.is_seminar;
+    if (payload.batch_name !== undefined) payload_to_update.batch_name = payload.batch_name;
+
+    if (payload.is_break !== undefined) {
+      payload_to_update.is_break = payload.is_break;
+      if (payload.is_break) {
+        payload_to_update.subjects_division_masters_id = null;
+        payload_to_update.staff_enrollment_id = null;
+        payload_to_update.lab_id = null;
+        payload_to_update.is_pt = false;
+        payload_to_update.is_free_period = false;
+        payload_to_update.is_library = false;
+        payload_to_update.is_seminar = false;
+        payload_to_update.batch_name = null;
+      }
+    }
+
+    const mergedPeriod = { ...period.toJSON(), ...payload_to_update } as TypeForPeriodsConfig;
+
+    if (!mergedPeriod.is_break && !mergedPeriod.is_pt && !mergedPeriod.is_free_period && !mergedPeriod.is_library && !mergedPeriod.is_seminar) {
+      if (mergedPeriod.staff_enrollment_id) {
+        const teacher_available = await this.checkTeacherAvailability(mergedPeriod, class_day_config, school_timetable_config);
+        if (!teacher_available.result) {
+          return ctx.response.badRequest({ message: teacher_available.message });
+        }
+      }
+
+      if (mergedPeriod.lab_id) {
+        const lab_available = await this.checklabAvailability(mergedPeriod, class_day_config, school_timetable_config);
+        if (!lab_available.result) {
+          return ctx.response.badRequest({ message: lab_available.message });
+        }
+      }
+    }
+
+    period.merge(payload_to_update);
+    await period.save();
+
+    await period.load('period_config_subject', (sq) => sq.preload('subject'));
+    await period.load('period_config_class_day', (cq) => cq.preload('class'));
+    await period.load('staff_enrollment', (seq) => seq.preload('staff'));
+    await period.load('lab');
+
+    return ctx.response.ok(period);
+  }
+
+  async deleteSinglePeriod(ctx: HttpContext) {
+    const period_id = ctx.params.period_id || ctx.params.id;
+    const period = await PeriodsConfig.find(period_id);
+    if (!period) {
+      return ctx.response.notFound({ message: 'Period not found' });
+    }
+
+    await period.delete();
+    return ctx.response.ok({ message: 'Period deleted successfully', id: period_id });
+  }
+
+  async saveTimetableVersion(ctx: HttpContext) {
+    const { division_id, academic_session_id, academic_year, version_name, start_date, end_date, periods_config, is_active } = ctx.request.all();
+    const sessionYear = academic_session_id || academic_year;
+
+    if (!division_id || !sessionYear) {
+      return ctx.response.badRequest({ message: 'division_id and academic_session_id/academic_year are required' });
+    }
+
+    const division = await Divisions.query().where('id', division_id).first();
+    if (!division) {
+      return ctx.response.badRequest({ message: 'Division not found' });
+    }
+
+    let periodsToSave = periods_config;
+    if (!periodsToSave || !Array.isArray(periodsToSave) || periodsToSave.length === 0) {
+      // Fetch current periods for this division from database
+      const schoolConfig = await SchoolTimeTableConfig.query().where('academic_year', Number(sessionYear)).first();
+      if (schoolConfig) {
+        const dayConfigs = await ClassDayConfig.query()
+          .where('school_timetable_config_id', schoolConfig.id)
+          .andWhere('class_id', division.class_id);
+        
+        if (dayConfigs.length > 0) {
+          periodsToSave = await PeriodsConfig.query()
+            .where('division_id', division_id)
+            .whereIn('class_day_config_id', dayConfigs.map(c => c.id))
+            .preload('period_config_subject', (sq) => sq.preload('subject'))
+            .preload('staff_enrollment', (seq) => seq.preload('staff'))
+            .preload('lab');
+        }
+      }
+    }
+
+    // Determine version name
+    const count = await TimetableVersion.query()
+      .where('division_id', division_id)
+      .andWhere('academic_year', Number(sessionYear))
+      .count('* as total');
+    const versionNumber = Number(count[0].$extras.total || 0) + 1;
+    const finalVersionName = version_name?.trim() || `Version ${versionNumber}`;
+
+    if (is_active !== false) {
+      // Set existing versions as not active
+      await TimetableVersion.query()
+        .where('division_id', division_id)
+        .andWhere('academic_year', Number(sessionYear))
+        .update({ is_active: false });
+    }
+
+    const version = await TimetableVersion.create({
+      division_id: division_id,
+      academic_year: Number(sessionYear),
+      version_name: finalVersionName,
+      start_date: start_date || null,
+      end_date: end_date || null,
+      is_active: is_active ?? true,
+      created_by: ctx.auth.user?.id || null,
+      version_data: JSON.stringify(periodsToSave || []),
+    });
+
+    return ctx.response.status(201).json({
+      message: 'Timetable version saved successfully',
+      version: {
+        ...version.toJSON(),
+        version_data: typeof version.version_data === 'string' ? JSON.parse(version.version_data) : version.version_data
+      }
+    });
+  }
+
+  async getTimetableVersions(ctx: HttpContext) {
+    const division_id = ctx.params.division_id;
+    const academic_session = ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.request.input('academic_year');
+
+    const query = TimetableVersion.query()
+      .where('division_id', division_id)
+      .preload('user')
+      .orderBy('created_at', 'desc');
+
+    if (academic_session) {
+      query.andWhere('academic_year', Number(academic_session));
+    }
+
+    const versions = await query;
+    const formatted = versions.map(v => {
+      let parsedData = [];
+      try {
+        parsedData = typeof v.version_data === 'string' ? JSON.parse(v.version_data) : v.version_data;
+      } catch (e) {
+        parsedData = [];
+      }
+      return {
+        ...v.toJSON(),
+        total_periods: Array.isArray(parsedData) ? parsedData.length : 0,
+        version_data: parsedData,
+      };
+    });
+
+    return ctx.response.ok(formatted);
+  }
+
+  async getTimetableVersionDetail(ctx: HttpContext) {
+    const version_id = ctx.params.version_id || ctx.params.id;
+    const version = await TimetableVersion.query()
+      .where('id', version_id)
+      .preload('user')
+      .preload('division')
+      .first();
+
+    if (!version) {
+      return ctx.response.notFound({ message: 'Timetable version not found' });
+    }
+
+    return ctx.response.ok({
+      ...version.toJSON(),
+      version_data: typeof version.version_data === 'string' ? JSON.parse(version.version_data) : version.version_data
+    });
+  }
+
+  async restoreTimetableVersion(ctx: HttpContext) {
+    const version_id = ctx.params.version_id || ctx.params.id;
+    const version = await TimetableVersion.query().where('id', version_id).first();
+    if (!version) {
+      return ctx.response.notFound({ message: 'Timetable version not found' });
+    }
+
+    let rawData = version.version_data;
+    let periods: any[] = [];
+    try {
+      periods = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+    } catch (e) {
+      return ctx.response.badRequest({ message: 'Invalid version snapshot data' });
+    }
+
+    const division = await Divisions.query().where('id', version.division_id).first();
+    if (!division) {
+      return ctx.response.badRequest({ message: 'Associated division not found' });
+    }
+
+    const schoolConfig = await SchoolTimeTableConfig.query().where('academic_year', version.academic_year).first();
+    if (!schoolConfig) {
+      return ctx.response.badRequest({ message: 'School timetable config not found for this academic session' });
+    }
+
+    const dayConfigs = await ClassDayConfig.query()
+      .where('school_timetable_config_id', schoolConfig.id)
+      .andWhere('class_id', division.class_id);
+
+    const dayConfigMap = new Map<string, number>();
+    const dayConfigIdSet = new Set(dayConfigs.map(d => d.id));
+    dayConfigs.forEach(d => dayConfigMap.set(d.day, d.id));
+
+    const trx = await db.transaction();
+    try {
+      // Clear current periods for this division
+      await PeriodsConfig.query()
+        .where('division_id', version.division_id)
+        .whereIn('class_day_config_id', Array.from(dayConfigIdSet))
+        .useTransaction(trx)
+        .delete();
+
+      // Restore periods
+      const createdPeriods: PeriodsConfig[] = [];
+      for (const p of periods) {
+        let classDayConfigId = p.class_day_config_id;
+        if (!classDayConfigId || !dayConfigIdSet.has(classDayConfigId)) {
+          if (p.day && dayConfigMap.has(p.day)) {
+            classDayConfigId = dayConfigMap.get(p.day)!;
+          } else if (p.period_config_class_day?.day && dayConfigMap.has(p.period_config_class_day.day)) {
+            classDayConfigId = dayConfigMap.get(p.period_config_class_day.day)!;
+          }
+        }
+
+        if (classDayConfigId && dayConfigIdSet.has(classDayConfigId)) {
+          const newPeriod = await PeriodsConfig.create({
+            class_day_config_id: classDayConfigId,
+            division_id: version.division_id,
+            period_order: p.period_order,
+            start_time: p.start_time,
+            end_time: p.end_time,
+            is_break: !!p.is_break,
+            subjects_division_masters_id: p.subjects_division_masters_id || null,
+            staff_enrollment_id: p.staff_enrollment_id || null,
+            lab_id: p.lab_id || null,
+            is_pt: !!p.is_pt,
+            is_free_period: !!p.is_free_period,
+            is_library: !!p.is_library,
+            is_seminar: !!p.is_seminar,
+            batch_name: p.batch_name || null,
+          }, { client: trx });
+          createdPeriods.push(newPeriod);
+        }
+      }
+
+      // Mark this version as active, others as inactive
+      await TimetableVersion.query()
+        .where('division_id', version.division_id)
+        .andWhere('academic_year', version.academic_year)
+        .useTransaction(trx)
+        .update({ is_active: false });
+
+      version.is_active = true;
+      await version.useTransaction(trx).save();
+
+      await trx.commit();
+
+      return ctx.response.ok({
+        message: `Restored ${version.version_name || 'timetable version'} successfully (${createdPeriods.length} periods restored)`,
+        version
+      });
+    } catch (error: any) {
+      await trx.rollback();
+      console.error('Error restoring timetable version:', error);
+      return ctx.response.badRequest({ message: 'Failed to restore timetable version: ' + (error.message || 'Unknown error') });
+    }
+  }
+
+  async deleteTimetableVersion(ctx: HttpContext) {
+    const version_id = ctx.params.version_id || ctx.params.id;
+    const version = await TimetableVersion.query().where('id', version_id).first();
+    if (!version) {
+      return ctx.response.notFound({ message: 'Timetable version not found' });
+    }
+
+    await version.delete();
+    return ctx.response.ok({ message: 'Timetable version deleted successfully' });
   }
 
   async deleteClassDayConfig(ctx: HttpContext) {

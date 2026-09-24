@@ -500,38 +500,38 @@ export const UpdateValidatorForStundets = vine.compile(
     students_data: vine
       .object({
         first_name: vine.string().trim().minLength(2).maxLength(50).optional(),
-        middle_name: vine.string().trim().minLength(2).maxLength(50).optional(),
+        middle_name: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
         last_name: vine.string().trim().minLength(2).maxLength(50).optional(),
 
-        first_name_in_guj: vine.string().trim().optional(),
-        middle_name_in_guj: vine.string().trim().optional(),
-        last_name_in_guj: vine.string().trim().optional(),
+        first_name_in_guj: vine.string().trim().nullable().optional(),
+        middle_name_in_guj: vine.string().trim().nullable().optional(),
+        last_name_in_guj: vine.string().trim().nullable().optional(),
 
-        gender: vine.enum(['Male', 'Female']).optional(),
+        gender: vine.enum(['Male', 'Female']).nullable().optional(),
 
-        birth_date: vine.date().optional(),
+        birth_date: vine.date().nullable().optional(),
 
         /**
          * FIX : this should be unique in between school's students
          */
-        gr_no: vine.number().positive().unique({ table: 'students', column: 'gr_no' }).optional(),
+        gr_no: vine.number().positive().unique({ table: 'students', column: 'gr_no' }).nullable().optional(),
 
         primary_mobile: vine.number().optional(),
 
-        father_name: vine.string().trim().minLength(3).maxLength(50).optional(),
-        father_name_in_guj: vine.string().trim().optional(),
+        father_name: vine.string().trim().minLength(3).maxLength(50).nullable().optional(),
+        father_name_in_guj: vine.string().trim().nullable().optional(),
 
-        mother_name: vine.string().trim().minLength(3).maxLength(50).optional(),
-        mother_name_in_guj: vine.string().trim().optional(),
+        mother_name: vine.string().trim().minLength(3).maxLength(50).nullable().optional(),
+        mother_name_in_guj: vine.string().trim().nullable().optional(),
 
         /**
          * FIX : make this optional or remove roll number from table in next migrtion
          *  */
-        roll_number: vine.number().positive().optional(),
+        roll_number: vine.number().positive().nullable().optional(),
 
-        aadhar_no: vine.number().optional(),
+        aadhar_no: vine.number().nullable().optional(),
 
-        is_active: vine.boolean().optional(),
+        is_active: vine.boolean().nullable().optional(),
         class_id: vine.number().optional(),
         practical_batch: vine.string().trim().nullable().optional(),
       })
@@ -545,46 +545,47 @@ export const UpdateValidatorForStundets = vine.compile(
           .number()
           .positive()
           // .unique({ table: 'students_meta', column: 'aadhar_dise_no' })
+          .nullable()
           .optional(),
 
-        birth_place: vine.string().trim().minLength(2).maxLength(100).optional(),
-        birth_place_in_guj: vine.string().trim().optional(),
+        birth_place: vine.string().trim().minLength(2).maxLength(100).nullable().optional(),
+        birth_place_in_guj: vine.string().trim().nullable().optional(),
 
-        religion: vine.string().trim().minLength(2).maxLength(50).optional(),
-        religion_in_guj: vine.string().trim().optional(),
+        religion: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
+        religion_in_guj: vine.string().trim().nullable().optional(),
 
-        caste: vine.string().trim().minLength(2).maxLength(50).optional(),
-        caste_in_guj: vine.string().trim().optional().optional(),
+        caste: vine.string().trim().minLength(2).maxLength(50).nullable().optional(),
+        caste_in_guj: vine.string().trim().nullable().optional(),
 
         category: vine.enum(['ST', 'SC', 'OBC', 'OPEN']).nullable().optional(),
 
-        admission_date: vine.date().optional(),
+        admission_date: vine.date().nullable().optional(),
 
         /**
          * TODO :
          *    validation for verify class added is not greater then in which student acctualy in
          */
-        admission_class_id: vine.number().optional(),
+        admission_class_id: vine.number().nullable().optional(),
 
-        secondary_mobile: vine.number().optional(),
+        secondary_mobile: vine.number().nullable().optional(),
 
-        privious_school: vine.string().trim().minLength(2).maxLength(100).optional(),
-        privious_school_in_guj: vine.string().trim().optional().optional(),
+        privious_school: vine.string().trim().nullable().optional(),
+        privious_school_in_guj: vine.string().trim().nullable().optional(),
 
-        address: vine.string().trim().minLength(5).maxLength(200).optional(),
+        address: vine.string().trim().nullable().optional(),
 
-        district: vine.string().trim().minLength(5).maxLength(100).optional(),
-        city: vine.string().trim().minLength(5).maxLength(100).optional(),
+        district: vine.string().trim().nullable().optional(),
+        city: vine.string().trim().nullable().optional(),
 
-        state: vine.string().trim().minLength(2).maxLength(50).optional(),
+        state: vine.string().trim().nullable().optional(),
 
-        postal_code: vine.string().trim().optional(),
+        postal_code: vine.string().trim().nullable().optional(),
 
-        bank_name: vine.string().trim().optional(),
+        bank_name: vine.string().trim().nullable().optional(),
 
-        account_no: vine.number().positive().optional(),
+        account_no: vine.number().positive().nullable().optional(),
 
-        IFSC_code: vine.string().trim().optional(),
+        IFSC_code: vine.string().trim().nullable().optional(),
 
         current_area: vine.string().trim().nullable().optional(),
         current_country: vine.string().trim().nullable().optional(),

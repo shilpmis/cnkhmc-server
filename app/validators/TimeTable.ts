@@ -173,3 +173,21 @@ export const UpdateValidatorForPeriodConfigWeek = vine.compile(
     )
   })
 )
+
+export const UpdateValidatorForSinglePeriodConfig = vine.compile(
+  vine.object({
+    period_order: vine.number().optional(),
+    start_time: vine.string().optional(),
+    end_time: vine.string().optional(),
+    is_break: vine.boolean().optional(),
+    subjects_division_masters_id: vine.number().nullable().optional(),
+    staff_enrollment_id: vine.number().nullable().optional(),
+    lab_id: vine.number().nullable().optional(),
+    is_pt: vine.boolean().optional(),
+    is_free_period: vine.boolean().optional(),
+    is_library: vine.boolean().optional(),
+    is_seminar: vine.boolean().optional(),
+    batch_name: vine.string().nullable().optional(),
+  })
+)
+

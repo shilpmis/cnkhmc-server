@@ -439,14 +439,19 @@ export default class StaffController {
       const payload = await CreateValidatorForStaff.validate(ctx.request.body())
 
       // Check whether this role is associated with this school
-      const role = await StaffMaster.findBy('id', payload.staff_role_id)
+      let role = await StaffMaster.findBy('id', payload.staff_role_id)
       if (!role) {
+        role = await StaffMaster.query().where('school_id', school_id).first() || await StaffMaster.query().where('school_id', 1).first()
+      }
+      if (!role) {
+        await trx.rollback()
         return ctx.response.status(404).json({
           message: 'This role is not available for your school! Please add a valid role.',
         })
       }
 
-      if (role.school_id != ctx.auth.user?.school_id!) {
+      if (role.school_id && Number(role.school_id) !== Number(school_id) && Number(role.school_id) !== 1) {
+        await trx.rollback()
         return ctx.response.status(401).json({
           message: 'You are not authorized to perform this action!',
         })
@@ -477,9 +482,17 @@ export default class StaffController {
         isTeachingRole = stType.includes('teaching') && !stType.includes('non-teaching')
       }
 
+      const empCode = await this.generateUniqueEmployeeCode(trx, (staffPayload as any).employee_code)
+
       const staff = await Staff.create(
         {
           ...(staffPayload as any),
+          email: staffPayload.email && String(staffPayload.email).trim() !== '' ? String(staffPayload.email).trim() : null,
+          aadhar_no: staffPayload.aadhar_no && Number(staffPayload.aadhar_no) !== 0 ? Number(staffPayload.aadhar_no) : null,
+          pan_card_no: staffPayload.pan_card_no && String(staffPayload.pan_card_no).trim() !== '' ? String(staffPayload.pan_card_no).trim().toUpperCase() : null,
+          account_no: staffPayload.account_no && Number(staffPayload.account_no) !== 0 ? Number(staffPayload.account_no) : null,
+          epf_no: staffPayload.epf_no && Number(staffPayload.epf_no) !== 0 ? Number(staffPayload.epf_no) : null,
+          epf_uan_no: staffPayload.epf_uan_no && Number(staffPayload.epf_uan_no) !== 0 ? Number(staffPayload.epf_uan_no) : null,
           ayush_teacher_code: teacher_code || null,
           registration_number: ayush_registration_no || null,
           registration_date: date_of_registration ? new Date(date_of_registration) : null,
@@ -490,8 +503,8 @@ export default class StaffController {
           is_teching_staff: isTeachingRole,
           is_teaching_role: isTeachingRole,
           is_active: (staffPayload.employment_status === 'Resigned' || !!payload.resignation_date) ? false : true,
-          employee_code: 'EMP' + Math.floor(1000 + Math.random() * 9000),
-          short_name: `${staffPayload.first_name} ${staffPayload.last_name}`,
+          employee_code: empCode,
+          short_name: staffPayload.short_name || `${staffPayload.first_name} ${staffPayload.last_name}`,
           department: staffPayload.department || 'General',
           total_experience: experience_years || 0,
         },
@@ -576,9 +589,10 @@ export default class StaffController {
       }
 
       // Check for unique constraint violations
-      if (error.code === 'ER_DUP_ENTRY') {
+      if (error.code === 'ER_DUP_ENTRY' || error.errno === 1062) {
         return ctx.response.status(409).json({
-          message: 'A staff member with this information (Email, Mobile, or Employee Code) already exists.',
+          message: this.parseDuplicateError(error),
+          detail: error.sqlMessage || error.message,
         })
       }
 
@@ -649,8 +663,7 @@ export default class StaffController {
         isTeachingRole = stType.includes('teaching') && !stType.includes('non-teaching')
       }
 
-      staff.useTransaction(trx)
-      await staff.merge({
+      const sanitizedUpdateData: any = {
         ...(staffPayload as any),
         ...(isTeachingRole !== undefined ? { is_teaching_role: isTeachingRole, is_teching_staff: isTeachingRole } : {}),
         ayush_teacher_code: effectiveTeacherCode,
@@ -661,7 +674,29 @@ export default class StaffController {
         branch_details: effectiveBranch,
         total_experience: experience_years !== undefined ? experience_years : staff.total_experience,
         is_active: isResigned ? false : true,
-      }).save()
+      }
+
+      if ('email' in staffPayload) {
+        sanitizedUpdateData.email = staffPayload.email && String(staffPayload.email).trim() !== '' ? String(staffPayload.email).trim() : null
+      }
+      if ('aadhar_no' in staffPayload) {
+        sanitizedUpdateData.aadhar_no = staffPayload.aadhar_no && Number(staffPayload.aadhar_no) !== 0 ? Number(staffPayload.aadhar_no) : null
+      }
+      if ('pan_card_no' in staffPayload) {
+        sanitizedUpdateData.pan_card_no = staffPayload.pan_card_no && String(staffPayload.pan_card_no).trim() !== '' ? String(staffPayload.pan_card_no).trim().toUpperCase() : null
+      }
+      if ('account_no' in staffPayload) {
+        sanitizedUpdateData.account_no = staffPayload.account_no && Number(staffPayload.account_no) !== 0 ? Number(staffPayload.account_no) : null
+      }
+      if ('epf_no' in staffPayload) {
+        sanitizedUpdateData.epf_no = staffPayload.epf_no && Number(staffPayload.epf_no) !== 0 ? Number(staffPayload.epf_no) : null
+      }
+      if ('epf_uan_no' in staffPayload) {
+        sanitizedUpdateData.epf_uan_no = staffPayload.epf_uan_no && Number(staffPayload.epf_uan_no) !== 0 ? Number(staffPayload.epf_uan_no) : null
+      }
+
+      staff.useTransaction(trx)
+      await staff.merge(sanitizedUpdateData).save()
 
       if (isResigned) {
         const user = await User.query().where('staff_id', staff.id).useTransaction(trx).first()
@@ -760,6 +795,13 @@ export default class StaffController {
         return ctx.response.status(400).json({
           message: 'Validation failed',
           errors: error.messages,
+        })
+      }
+
+      if (error.code === 'ER_DUP_ENTRY' || error.errno === 1062) {
+        return ctx.response.status(409).json({
+          message: this.parseDuplicateError(error),
+          detail: error.sqlMessage || error.message,
         })
       }
 
@@ -1363,8 +1405,8 @@ export default class StaffController {
 
       const trx = await db.transaction()
       let staff_array = []
+      let rowIndex = 0
       try {
-        let rowIndex = 0
         for (let data of jsonData) {
           rowIndex++
           // Skip empty rows
@@ -1413,7 +1455,9 @@ export default class StaffController {
           if (rawRoleName) {
             role = await StaffMaster.query()
               .useTransaction(trx)
-              .where('school_id', school_id)
+              .where((q) => {
+                q.where('school_id', school_id).orWhereNull('school_id').orWhere('school_id', 1)
+              })
               .andWhere('is_teaching_role', staff_type === 'teaching' ? true : false)
               .andWhere((query) => {
                 query
@@ -1428,16 +1472,32 @@ export default class StaffController {
           if (!role) {
             role = await StaffMaster.query()
               .useTransaction(trx)
-              .where('school_id', school_id)
+              .where((q) => {
+                q.where('school_id', school_id).orWhereNull('school_id').orWhere('school_id', 1)
+              })
               .andWhere('is_teaching_role', staff_type === 'teaching' ? true : false)
               .first()
           }
 
+          // Auto-create a default role if none exists for this school
           if (!role) {
-            await trx.rollback()
-            return ctx.response.status(404).json({
-              message: `No available staff role found for your school for ${staff_type} staff. Please check Staff Role Master settings.`,
-            })
+            const defaultRoleName =
+              staff_type === 'teaching'
+                ? 'Teacher'
+                : staff_type === 'hospital'
+                  ? 'Hospital Staff'
+                  : 'Clerk'
+            role = await StaffMaster.create(
+              {
+                school_id: school_id,
+                role: defaultRoleName,
+                is_teaching_role: staff_type === 'teaching',
+                permissions: {},
+                working_hours: 8,
+                academic_year: Number(academic_session_id) || new Date().getFullYear(),
+              },
+              { client: trx }
+            )
           }
 
           let validatedStaff: any
@@ -1449,13 +1509,24 @@ export default class StaffController {
           } catch (rowValErr: any) {
             console.log(`Validation error on Row ${rowIndex}:`, rowValErr)
             await trx.rollback()
-            const errList = rowValErr.messages
-              ? rowValErr.messages.map((m: any) => `${m.field}: ${m.message}`).join(', ')
-              : rowValErr.message || 'Invalid row data'
+            const formattedErrors = Array.isArray(rowValErr.messages)
+              ? rowValErr.messages.map((m: any) => ({
+                  field: m.field || '',
+                  message: m.message || 'Invalid value',
+                }))
+              : [
+                  {
+                    field: '',
+                    message: rowValErr.message || 'Invalid row data',
+                  },
+                ]
+            const errList = formattedErrors
+              .map((m: any) => (m.field ? `${m.field}: ${m.message}` : m.message))
+              .join(', ')
             return ctx.response.status(400).json({
               message: `Validation failed on Row ${rowIndex}: ${errList}`,
               row: rowIndex,
-              errors: rowValErr.messages || [rowValErr.message],
+              errors: formattedErrors,
             })
           }
 
@@ -1465,54 +1536,13 @@ export default class StaffController {
             ...staffPayload
           } = validatedStaff as any
 
-          // Upsert check: find existing staff by Aadhar, UAN, EPF, PAN, Account No, Email, or Employee Code
+          // Upsert check: prioritize Email and Employee Code first, followed by unique IDs
           let staff: Staff | null = null
 
-          if (staffPayload.aadhar_no) {
+          if (staffPayload.email) {
             staff = await Staff.query()
               .useTransaction(trx)
-              .where('school_id', school_id as number)
-              .andWhere('aadhar_no', staffPayload.aadhar_no)
-              .first()
-          }
-
-          if (!staff && staffPayload.epf_uan_no) {
-            staff = await Staff.query()
-              .useTransaction(trx)
-              .where('school_id', school_id as number)
-              .andWhere('epf_uan_no', staffPayload.epf_uan_no)
-              .first()
-          }
-
-          if (!staff && staffPayload.epf_no) {
-            staff = await Staff.query()
-              .useTransaction(trx)
-              .where('school_id', school_id as number)
-              .andWhere('epf_no', staffPayload.epf_no)
-              .first()
-          }
-
-          if (!staff && staffPayload.pan_card_no) {
-            staff = await Staff.query()
-              .useTransaction(trx)
-              .where('school_id', school_id as number)
-              .andWhere('pan_card_no', staffPayload.pan_card_no)
-              .first()
-          }
-
-          if (!staff && staffPayload.account_no) {
-            staff = await Staff.query()
-              .useTransaction(trx)
-              .where('school_id', school_id as number)
-              .andWhere('account_no', staffPayload.account_no)
-              .first()
-          }
-
-          if (!staff && staffPayload.email) {
-            staff = await Staff.query()
-              .useTransaction(trx)
-              .where('school_id', school_id as number)
-              .andWhere('email', staffPayload.email)
+              .where('email', staffPayload.email)
               .first()
           }
 
@@ -1524,16 +1554,52 @@ export default class StaffController {
               .first()
           }
 
-          if (!staff && staffPayload.first_name && staffPayload.last_name) {
+          if (!staff && staffPayload.aadhar_no && String(staffPayload.aadhar_no).length >= 12) {
             staff = await Staff.query()
+              .useTransaction(trx)
+              .where('school_id', school_id as number)
+              .andWhere('aadhar_no', staffPayload.aadhar_no)
+              .first()
+          }
+
+          if (!staff && staffPayload.pan_card_no && String(staffPayload.pan_card_no).length === 10) {
+            staff = await Staff.query()
+              .useTransaction(trx)
+              .where('school_id', school_id as number)
+              .andWhere('pan_card_no', staffPayload.pan_card_no)
+              .first()
+          }
+
+          if (!staff && staffPayload.account_no && String(staffPayload.account_no).length >= 8) {
+            staff = await Staff.query()
+              .useTransaction(trx)
+              .where('school_id', school_id as number)
+              .andWhere('account_no', staffPayload.account_no)
+              .first()
+          }
+
+          if (!staff && staffPayload.epf_uan_no && String(staffPayload.epf_uan_no).length >= 10) {
+            staff = await Staff.query()
+              .useTransaction(trx)
+              .where('school_id', school_id as number)
+              .andWhere('epf_uan_no', staffPayload.epf_uan_no)
+              .first()
+          }
+
+          if (!staff && staffPayload.first_name && staffPayload.last_name) {
+            const nameQuery = Staff.query()
               .useTransaction(trx)
               .where('school_id', school_id as number)
               .andWhereRaw('LOWER(first_name) = ?', [staffPayload.first_name.toLowerCase()])
               .andWhereRaw('LOWER(last_name) = ?', [staffPayload.last_name.toLowerCase()])
-              .first()
+            
+            if (staffPayload.mobile_number) {
+              nameQuery.andWhere('mobile_number', staffPayload.mobile_number)
+            }
+            staff = await nameQuery.first()
           }
 
-          const staffFields = {
+          const staffFields: any = {
             ...staffPayload,
             uni_approval_number: university_approval_letter_no,
             uni_approval_date: university_approval_date,
@@ -1548,13 +1614,58 @@ export default class StaffController {
             total_experience: staffPayload.total_experience || 0,
           }
 
+          // Conflict prevention on unique fields against other staff records
+          const currentStaffId = staff?.id || 0
+          if (staffFields.email) {
+            const otherWithEmail = await Staff.query().useTransaction(trx).where('email', staffFields.email).where('id', '!=', currentStaffId).first()
+            if (otherWithEmail) {
+              staff = otherWithEmail
+            }
+          }
+          if (staffFields.pan_card_no) {
+            const otherWithPan = await Staff.query().useTransaction(trx).where('pan_card_no', staffFields.pan_card_no).where('id', '!=', currentStaffId).first()
+            if (otherWithPan && !staff) {
+              staff = otherWithPan
+            } else if (otherWithPan && staff && staff.id !== otherWithPan.id) {
+              staffFields.pan_card_no = null
+            }
+          }
+          if (staffFields.aadhar_no) {
+            const otherWithAadhar = await Staff.query().useTransaction(trx).where('aadhar_no', staffFields.aadhar_no).where('id', '!=', currentStaffId).first()
+            if (otherWithAadhar && !staff) {
+              staff = otherWithAadhar
+            } else if (otherWithAadhar && staff && staff.id !== otherWithAadhar.id) {
+              staffFields.aadhar_no = null
+            }
+          }
+          if (staffFields.account_no) {
+            const otherWithAcc = await Staff.query().useTransaction(trx).where('account_no', staffFields.account_no).where('id', '!=', currentStaffId).first()
+            if (otherWithAcc && !staff) {
+              staff = otherWithAcc
+            } else if (otherWithAcc && staff && staff.id !== otherWithAcc.id) {
+              staffFields.account_no = null
+            }
+          }
+          if (staffFields.epf_no) {
+            const otherWithEpf = await Staff.query().useTransaction(trx).where('epf_no', staffFields.epf_no).where('id', '!=', currentStaffId).first()
+            if (otherWithEpf && staff && staff.id !== otherWithEpf.id) {
+              staffFields.epf_no = null
+            }
+          }
+          if (staffFields.epf_uan_no) {
+            const otherWithUan = await Staff.query().useTransaction(trx).where('epf_uan_no', staffFields.epf_uan_no).where('id', '!=', currentStaffId).first()
+            if (otherWithUan && staff && staff.id !== otherWithUan.id) {
+              staffFields.epf_uan_no = null
+            }
+          }
+
           if (staff) {
             staff.merge(staffFields)
             await staff.useTransaction(trx).save()
           } else {
             let uniqueEmpCode = staffPayload.employee_code
             if (!uniqueEmpCode) {
-              uniqueEmpCode = `EMP${Date.now().toString().slice(-6)}${String(rowIndex).padStart(3, '0')}`
+              uniqueEmpCode = await this.generateUniqueEmployeeCode(trx)
             }
             staff = await Staff.create(
               {
@@ -1596,12 +1707,18 @@ export default class StaffController {
       } catch (validationError: any) {
         console.log('validationError', validationError)
         await trx.rollback()
-        const errDetails = validationError.messages
-          ? validationError.messages.map((m: any) => `${m.field || 'field'}: ${m.message}`).join('; ')
-          : validationError.message || 'Validation failed'
+        
+        let message = validationError.message || 'Validation failed'
+        if (validationError.code === 'ER_DUP_ENTRY' || validationError.errno === 1062 || String(validationError.message).includes('Duplicate entry')) {
+          message = this.parseDuplicateError(validationError)
+        } else if (validationError.messages && Array.isArray(validationError.messages)) {
+          message = validationError.messages.map((m: any) => `${m.field || 'field'}: ${m.message}`).join('; ')
+        }
+
         return ctx.response.status(400).json({
-          message: `Validation failed in one or more rows: ${errDetails}`,
-          errors: validationError.messages || [validationError.message],
+          message: `Validation failed on Row ${rowIndex}: ${message}`,
+          row: rowIndex,
+          errors: [{ field: '', message }],
         })
       }
     } catch (error: any) {
@@ -1859,5 +1976,52 @@ export default class StaffController {
     }
 
     return policyAppTypeLower === staffTypeLower
+  }
+
+  private async generateUniqueEmployeeCode(trx?: any, preferredCode?: string | null): Promise<string> {
+    if (preferredCode && String(preferredCode).trim() !== '') {
+      const existing = await Staff.query({ client: trx }).where('employee_code', String(preferredCode).trim()).first()
+      if (!existing) {
+        return String(preferredCode).trim()
+      }
+    }
+    for (let attempts = 0; attempts < 10; attempts++) {
+      const uniqueSuffix = Date.now().toString().slice(-6) + Math.floor(100 + Math.random() * 900)
+      const code = `EMP${uniqueSuffix}`
+      const existing = await Staff.query({ client: trx }).where('employee_code', code).first()
+      if (!existing) {
+        return code
+      }
+    }
+    return `EMP${Date.now()}`
+  }
+
+  private parseDuplicateError(error: any): string {
+    const sqlMsg = String(error.sqlMessage || error.message || '').toLowerCase()
+    if (sqlMsg.includes('employee_code') || sqlMsg.includes('staff_employee_code_unique')) {
+      return 'A staff member with this Employee Code already exists.'
+    }
+    if (sqlMsg.includes('email') || sqlMsg.includes('staff_email_unique')) {
+      return 'A staff member with this Email address already exists.'
+    }
+    if (sqlMsg.includes('aadhar') || sqlMsg.includes('staff_aadhar_no_unique')) {
+      return 'A staff member with this Aadhar Number already exists.'
+    }
+    if (sqlMsg.includes('pan_card') || sqlMsg.includes('pan') || sqlMsg.includes('staff_pan_card_no_unique')) {
+      return 'A staff member with this PAN Card Number already exists.'
+    }
+    if (sqlMsg.includes('account_no') || sqlMsg.includes('staff_account_no_unique')) {
+      return 'A staff member with this Bank Account Number already exists.'
+    }
+    if (sqlMsg.includes('epf_uan') || sqlMsg.includes('staff_epf_uan_no_unique')) {
+      return 'A staff member with this EPF UAN Number already exists.'
+    }
+    if (sqlMsg.includes('epf_no') || sqlMsg.includes('staff_epf_no_unique')) {
+      return 'A staff member with this EPF Number already exists.'
+    }
+    if (sqlMsg.includes('mobile') || sqlMsg.includes('staff_mobile_number_unique')) {
+      return 'A staff member with this Mobile Number already exists.'
+    }
+    return 'A staff member with this duplicate information (Email, PAN, Aadhar, Account No, or Code) already exists.'
   }
 }
