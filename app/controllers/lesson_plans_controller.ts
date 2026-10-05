@@ -28,11 +28,13 @@ const fonts = {
  * Safely extracts a string value from an ExcelJS cell.
  * Handles plain strings, numbers, richText objects, and formula results.
  */
-function getCellValue(cell: ExcelJS.Cell): string {
-  // If the cell is a merged child cell, its value is technically the master cell's value,
-  // but we want to ignore it to prevent duplicating values (like Hours) across rows.
-  if (cell.isMerged && cell.master && cell.master.address !== cell.address) return ''
-  const val = cell.value
+function getCellValue(cell: ExcelJS.Cell | undefined | null): string {
+  if (!cell) return ''
+  let targetCell = cell
+  if (cell.isMerged && cell.master) {
+    targetCell = cell.master
+  }
+  const val = targetCell.value
   if (val === null || val === undefined) return ''
   if (typeof val === 'string') return val.trim()
   if (typeof val === 'number' || typeof val === 'boolean') return String(val).trim()
@@ -52,6 +54,13 @@ function getCellValue(cell: ExcelJS.Cell): string {
     if (val instanceof Date) return val.toISOString()
   }
   return String(val).trim()
+}
+
+/**
+ * Checks if an ExcelJS cell is a merged child (non-master) cell.
+ */
+function isMergedChildCell(cell: ExcelJS.Cell | undefined | null): boolean {
+  return !!(cell && cell.isMerged && cell.master && cell.address !== cell.master.address)
 }
 
 /**
@@ -140,7 +149,14 @@ export default class LessonPlanController {
 
           // Map semantic columns – order matters (most specific first)
           if (['sino', 'slno', 'srno', 'code', 'sno'].some(k => clean === k)) tmpMap.code = c
-          if (['topic', 'topicname', 'subjectarea'].some(k => clean.includes(k))) tmpMap.topicName = c
+          if (clean === 'topic' || clean === 'topicname') {
+            tmpMap.topicName = c
+          } else if (clean.includes('subjectarea') && !tmpMap.topicName) {
+            tmpMap.topicName = c
+          }
+          if (clean.includes('subjectarea') && !tmpMap.subjectArea) {
+            tmpMap.subjectArea = c
+          }
           if (clean.includes('content')) tmpMap.content = c
           if (['competency', 'domainofcompetency'].some(k => clean.includes(k))) tmpMap.competency = c
           if (['slo', 'specificlearningobjective', 'outcome', 'detail'].some(k => clean.includes(k))) tmpMap.outcome = c
@@ -160,10 +176,25 @@ export default class LessonPlanController {
         if (hits >= 2 || (r === 1 && Object.keys(tmpMap).length >= 1)) {
           headerRowNum = r
           colMap = tmpMap
-          if (!colMap.topicName && colMap.content) {
+          if (!colMap.topicName && colMap.subjectArea) {
+            colMap.topicName = colMap.subjectArea
+          } else if (!colMap.topicName && colMap.content) {
             colMap.topicName = colMap.content
           }
-          console.log(`[Upload Syllabus] Header row detected at row ${r}:`, colMap)
+
+          // Check if row r + 1 is also a sub-header row
+          if (r < worksheet.rowCount) {
+            const nextRow = worksheet.getRow(r + 1)
+            const sampleCode = getCellValue(nextRow.getCell(colMap.code || 1))
+            const sampleLp = getCellValue(nextRow.getCell(colMap.lpNumber || 14))
+            const cleanCode = cleanHeader(sampleCode)
+            const cleanLp = cleanHeader(sampleLp)
+            if (['slno', 'srno', 'sno', 'code'].includes(cleanCode) || ['lpno', 'lp'].includes(cleanLp)) {
+              headerRowNum = r + 1
+              console.log(`[Upload Syllabus] Row ${r + 1} detected as sub-header. Data starts at row ${headerRowNum + 1}`)
+            }
+          }
+          console.log(`[Upload Syllabus] Header row detected at row ${headerRowNum}:`, colMap)
           break
         }
       }
@@ -213,49 +244,71 @@ export default class LessonPlanController {
 
       // ── Parse data rows ───────────────────────────────────────────────────
       const parsedRows: any[] = []
+      let lastTopicName = ''
       let lastCompetency = ''
+      let lastLpNumber = ''
+
       for (let rowNum = headerRowNum + 1; rowNum <= worksheet.rowCount; rowNum++) {
         const row = worksheet.getRow(rowNum)
 
         const getCol = (key: string) => colMap[key] ? getCellValue(row.getCell(colMap[key])) : ''
+        const isChild = (key: string) => colMap[key] ? isMergedChildCell(row.getCell(colMap[key])) : false
 
         const code = getCol('code')
-        const topicName = getCol('topicName')
+        let topicName = getCol('topicName')
+        const subjectArea = getCol('subjectArea')
         const content = getCol('content')
         let competency = getCol('competency') || content
         const outcome = getCol('outcome')
+
+        // For hours: if this cell is a merged child cell, hours = 0 (only master cell gets the hours value)
+        const hoursIsChild = isChild('hours')
         const hoursRaw = getCol('hours')
-        const hours = parseFloat(hoursRaw) || 0
-        const lpNumber = getCol('lpNumber')
+        const hours = hoursIsChild ? 0 : (parseFloat(hoursRaw) || 0)
+
+        let lpNumber = getCol('lpNumber')
         const miller = getCol('miller')
         const bloom = getCol('bloom')
         const priority = getCol('priority')
         const tlMm = getCol('tlMm')
         const assess1 = getCol('assessment')
         const assess2 = colMap['assessment2'] ? getCellValue(row.getCell(colMap['assessment2'])) : ''
-        // Merge two assessment columns if both exist (e.g. Formative + Summative)
-        let assessment = ''
-        if (assess1 && assess2) {
-          assessment = `${assess1} | ${assess2}`
-        } else {
-          assessment = assess1 || assess2
-        }
+        let assessment = assess1 && assess2 ? `${assess1} | ${assess2}` : (assess1 || assess2)
         const integration = getCol('integration')
 
-        // Skip completely empty rows
-        const rowHasContent = topicName || competency || content || outcome || hours > 0 || code
+        // Skip sub-header or empty rows
+        const cleanCode = cleanHeader(code)
+        const cleanLp = cleanHeader(lpNumber)
+        if (['slno', 'srno', 'sno', 'code'].includes(cleanCode) || ['lpno', 'lp'].includes(cleanLp)) {
+          continue
+        }
+
+        const rowHasContent = topicName || competency || content || outcome || hours > 0 || code || lpNumber
         if (!rowHasContent) continue
 
-        // Propagate competency
+        // Forward propagate topicName, lpNumber, competency if missing in row
+        if (topicName) {
+          lastTopicName = topicName
+        } else {
+          topicName = lastTopicName
+        }
+
+        if (lpNumber) {
+          lastLpNumber = lpNumber
+        } else {
+          lpNumber = lastLpNumber
+        }
+
         if (competency) {
           lastCompetency = competency
-        } else if (topicName || outcome || hours > 0) {
+        } else {
           competency = lastCompetency
         }
 
         parsedRows.push({
           code,
-          topicName,
+          topicName: topicName || subjectArea || 'General Syllabus',
+          subjectArea,
           content,
           competency,
           outcome,
@@ -296,7 +349,7 @@ export default class LessonPlanController {
         }
 
         const isNewTopicHeader = item.topicName && !item.competency && !item.outcome
-        const isNewTopicGroup = item.topicName && currentTopic && item.topicName !== currentTopic.name
+        const isNewTopicGroup = item.topicName && currentTopic && item.topicName.trim().toLowerCase() !== currentTopic.name.trim().toLowerCase()
 
         if (isNewTopicHeader || isNewTopicGroup || (item.topicName && !currentTopic)) {
           await saveCurrentTopicAndSubtopics()
@@ -318,7 +371,7 @@ export default class LessonPlanController {
         if (!currentTopic) {
           currentTopic = await LessonPlanTopic.create({
             lessonPlanId: lp.id,
-            name: item.topicName || item.competency || item.outcome || 'General Syllabus',
+            name: item.topicName || item.subjectArea || item.competency || item.outcome || 'General Syllabus',
             code: item.code || null,
             requiredHours: 0,
             isCompleted: false,
@@ -405,6 +458,24 @@ export default class LessonPlanController {
         })
         .orderBy('id', 'desc')
         .first()
+
+      if (lp && lp.topics) {
+        lp.topics.forEach((topic) => {
+          const topicSubtopics = topic.subtopics || []
+          const subSum = topicSubtopics.reduce((acc, st) => acc + (Number(st.requiredHours) || 0), 0)
+          const realReq = topicSubtopics.length > 0 && subSum > 0 ? subSum : topic.requiredHours
+          topic.requiredHours = realReq
+
+          const isTopicDone = (Number(topic.completedHours) || 0) >= (realReq - 0.01)
+          topic.isCompleted = isTopicDone
+
+          if (topicSubtopics.length > 0) {
+            topicSubtopics.forEach((st) => {
+              st.isCompleted = isTopicDone
+            })
+          }
+        })
+      }
 
       return response.ok(lp || null)
     } catch (error: any) {
@@ -737,6 +808,26 @@ export default class LessonPlanController {
         .orderBy('order', 'asc')
       : []
 
+    if (subtopics.length === 0) {
+      return response.badRequest({ message: `No subtopics found for Lesson Plan ${lpNumber}` })
+    }
+
+    // Validate that all subtopics for this LP number are completed AND all allocated hours are met
+    const allSubtopicsCompleted = subtopics.every(st => Boolean(st.isCompleted))
+
+    const topicMap = new Map<number, any>()
+    subtopics.forEach(st => {
+      if (st.topic) topicMap.set(st.topic.id, st.topic)
+    })
+    const lpTopics = Array.from(topicMap.values())
+    const allHoursCompleted = lpTopics.every(t => (Number(t.completedHours) || 0) >= (Number(t.requiredHours) || 0))
+
+    if (!allSubtopicsCompleted || !allHoursCompleted) {
+      return response.badRequest({
+        message: `Lesson Plan ${lpNumber} cannot be exported until all subtopics are taught and allocated hours are fully completed.`
+      })
+    }
+
     // ── C. Department name (from subject's department) ────────────────────
     // Department lookup removed (department heading not used in PDF output)
     // Use subject name for the "Department of …" heading — matches user's requirement
@@ -850,9 +941,9 @@ export default class LessonPlanController {
     }
 
     // ── G. Build detail strings ───────────────────────────────────────────
-    const parentTopicName = subtopics[0]?.topic?.name || 'N/A'
+    const parentTopicName = [...new Set(subtopics.map(st => st.topic?.name).filter(Boolean))].join(' / ') || 'N/A'
     const subtopicNameHeader = subtopics.map(st => st.name).join(', ')
-    const competencyHeader = subtopics[0]?.competency || 'N/A'
+    const competencyHeader = [...new Set(subtopics.map(st => st.competency).filter(Boolean))].join(', ') || 'N/A'
     const conclusionText = dailyLogs.map(log => log.conclusion).filter(Boolean).join('\n') || 'N/A'
     const referenceBookText = dailyLogs.map(log => log.referenceBook).filter(Boolean).join('\n') || 'N/A'
     const attendanceText = dailyLogs.map(log => log.attendance).filter(Boolean).join(', ') || 'N/A'
@@ -977,13 +1068,6 @@ export default class LessonPlanController {
                     { text: 'Lesson Plan Number:- ', bold: true, color: '#b91c1c' },
                     { text: lpNumber || 'N/A', bold: true, color: '#b91c1c' }
                   ],
-                  alignment: 'center', margin: [0, 2, 0, 2], fontSize: 9
-                },
-                {
-                  text: [
-                    { text: 'Attendance:- ', bold: true, color: '#b91c1c' },
-                    { text: attendanceText, bold: true, color: '#b91c1c' }
-                  ],
                   alignment: 'center', margin: [0, 2, 0, 4], fontSize: 9
                 },
                 {
@@ -1059,34 +1143,37 @@ export default class LessonPlanController {
           },
           margin: [0, 0, 0, 8]
         },
-        // 4. Conclusion
+        // 4. Footer section (Conclusion, Reference Book, HOD signature) wrapped in unbreakable stack
         {
-          text: [
-            { text: 'Conclusion:- ', bold: true, color: '#b91c1c' },
-            { text: conclusionText, color: '#b91c1c' }
-          ],
-          margin: [0, 6, 0, 4], fontSize: 8
-        },
-        // 5. Reference Book
-        {
-          table: {
-            widths: ['100%'],
-            body: [[{
-              stack: [
-                { text: 'Reference Book:-', bold: true, fontSize: 7, margin: [0, 0, 0, 2] },
-                { text: referenceBookText, fontSize: 7 }
+          stack: [
+            {
+              text: [
+                { text: 'Conclusion:- ', bold: true, color: '#b91c1c' },
+                { text: conclusionText, color: '#b91c1c' }
               ],
-              margin: [5, 3, 5, 3]
-            }]]
-          },
-          layout: {
-            hLineWidth: () => 0.5, vLineWidth: () => 0.5,
-            hLineColor: () => '#cbd5e1', vLineColor: () => '#cbd5e1'
-          },
-          margin: [0, 4, 0, 8]
-        },
-        // 6. HOD signature
-        { text: 'HOD:-', bold: true, color: '#b91c1c', alignment: 'right', margin: [0, 4, 20, 8], fontSize: 8 }
+              margin: [0, 6, 0, 4], fontSize: 8
+            },
+            {
+              table: {
+                widths: ['100%'],
+                body: [[{
+                  stack: [
+                    { text: 'Reference Book:-', bold: true, fontSize: 7, margin: [0, 0, 0, 2] },
+                    { text: referenceBookText, fontSize: 7 }
+                  ],
+                  margin: [5, 3, 5, 3]
+                }]]
+              },
+              layout: {
+                hLineWidth: () => 0.5, vLineWidth: () => 0.5,
+                hLineColor: () => '#cbd5e1', vLineColor: () => '#cbd5e1'
+              },
+              margin: [0, 4, 0, 8]
+            },
+            { text: 'HOD:-', bold: true, color: '#b91c1c', alignment: 'right', margin: [0, 4, 20, 8], fontSize: 8 }
+          ],
+          unbreakable: true
+        }
       ],
       styles: {
         collegeTitle: { fontSize: 13, bold: true, color: '#1e293b' },

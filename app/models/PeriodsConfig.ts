@@ -7,6 +7,7 @@ import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import SubjectDivisionMaster from './SubjectDivisionMaster.js'
 import ClassDayConfig from './ClassDayConfig.js'
 import StaffEnrollment from './StaffEnrollment.js'
+import Divisions from './Divisions.js'
 
 export default class PeriodsConfig extends Base {
 
@@ -74,5 +75,10 @@ export default class PeriodsConfig extends Base {
         foreignKey: 'staff_enrollment_id',
     })
     declare staff_enrollment: BelongsTo<typeof StaffEnrollment>
+
+    @belongsTo(() => Divisions, {
+        foreignKey: 'division_id',
+    })
+    declare division: BelongsTo<typeof Divisions>
 
 }

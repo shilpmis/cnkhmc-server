@@ -13,13 +13,13 @@ export default class DailyDiary extends Base {
   @column()
   declare date: string
 
-  @column({ columnName: 'topic_covered' })
+  @column({ columnName: 'topic_covered', serializeAs: 'topicCovered' })
   declare topicCovered: string | null
 
-  @column({ columnName: 'resources_used' })
+  @column({ columnName: 'resources_used', serializeAs: 'resourcesUsed' })
   declare resourcesUsed: string | null
 
-  @column({ columnName: 'attendance_remarks' })
+  @column({ columnName: 'attendance_remarks', serializeAs: 'attendanceRemarks' })
   declare attendanceRemarks: string | null
 
   @column()

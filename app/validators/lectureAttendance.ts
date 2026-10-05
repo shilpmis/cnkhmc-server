@@ -6,6 +6,8 @@ export const ValidatorForMarkLectureAttendance = vine.compile(
     subject_id: vine.number(),
     academic_year: vine.number(),
     date: vine.date(),
+    lecture_number: vine.number().optional(),
+    periods_config_id: vine.number().nullable().optional(),
     session_type: vine.enum(['lecture', 'lab']),
     marked_by: vine.number(),
     attendance_data: vine.array(

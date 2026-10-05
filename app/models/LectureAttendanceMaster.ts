@@ -24,6 +24,12 @@ export default class LectureAttendanceMaster extends Base {
   declare attendance_date: string
 
   @column()
+  declare lecture_number: number
+
+  @column()
+  declare periods_config_id: number | null
+
+  @column()
   declare session_type: 'lecture' | 'lab'
 
   @hasMany(() => LectureAttendanceDetail, {

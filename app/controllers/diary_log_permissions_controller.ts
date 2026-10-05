@@ -9,7 +9,7 @@ export default class DiaryLogPermissionsController {
         query.select('id', 'first_name', 'last_name', 'employee_code')
       })
       .preload('grantedByUser', (query) => {
-        query.select('id', 'first_name', 'last_name')
+        query.select('id', 'name')
       })
       .orderBy('date', 'desc')
       
@@ -41,7 +41,7 @@ export default class DiaryLogPermissionsController {
     })
 
     await permission.load('staff', (q) => q.select('id', 'first_name', 'last_name', 'employee_code'))
-    await permission.load('grantedByUser', (q) => q.select('id', 'first_name', 'last_name'))
+    await permission.load('grantedByUser', (q) => q.select('id', 'name'))
 
     return response.created(permission)
   }

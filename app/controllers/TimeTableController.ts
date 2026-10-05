@@ -28,7 +28,7 @@ const fonts = {
 interface TypeForPeriodsConfig {
   id?: number;
   class_day_config_id: number;
-  division_id: number;
+  division_id?: number | null;
   period_order: number;
   start_time: string;
   end_time: string;
@@ -511,6 +511,10 @@ export default class TimeTableController {
     }
 
     // check if division_id is valid
+    if (!division_id) {
+      return ctx.response.badRequest({ message: 'Division ID is required' })
+    }
+
     let division = await Divisions.query().where('id', division_id).first();
     if (!division) {
       return ctx.response.badRequest({ message: 'Division not found' })
@@ -585,6 +589,10 @@ export default class TimeTableController {
     }
 
     // check if division_id is valid
+    if (!division_id) {
+      return ctx.response.badRequest({ message: 'Division ID is required' })
+    }
+
     let division = await Divisions.query().where('id', division_id).first();
     if (!division) {
       return ctx.response.badRequest({ message: 'Division not found' })
@@ -699,6 +707,10 @@ export default class TimeTableController {
     let { division_id, days } = await UpdateValidatorForPeriodConfigWeek.validate(ctx.request.all());
 
     // Basic division validation
+    if (!division_id) {
+      return ctx.response.badRequest({ message: 'Division ID is required' })
+    }
+
     let division = await Divisions.query().where('id', division_id).first();
     if (!division) {
       return ctx.response.badRequest({ message: 'Division not found' })
@@ -1330,34 +1342,44 @@ export default class TimeTableController {
       };
     }
 
-    // Fetch all periods for this teacher on the same day
+    // Fetch all staff enrollments for the same teacher (staff_id) across all classes/years
+    const currentEnrollment = await db.from('staff_enrollments')
+      .where('id', period_config.staff_enrollment_id)
+      .first()
 
+    let allEnrollmentIds = [period_config.staff_enrollment_id]
+    if (currentEnrollment?.staff_id) {
+      const sameTeacherEnrollments = await db.from('staff_enrollments')
+        .where('staff_id', currentEnrollment.staff_id)
+        .select('id')
+      allEnrollmentIds = sameTeacherEnrollments.map(e => Number(e.id))
+    }
+
+    // Fetch all day configs for this day across ALL classes/years in the school config
     let sameDayConfigIds = cachedSameDayConfigIds;
     if (!sameDayConfigIds) {
-      let check_class_day_config = await ClassDayConfig.query()
-        .where('id', period_config.class_day_config_id)
-        .first();
-
       let fetch_day_config_for_same_day = await ClassDayConfig.query()
         .where('school_timetable_config_id', class_day_config.school_timetable_config_id)
-        .andWhere('day', check_class_day_config!.day);
+        .andWhere('day', class_day_config.day);
       
       sameDayConfigIds = fetch_day_config_for_same_day.map((c) => c.id);
     }
 
     const periods = cachedAllWeekPeriods
       ? cachedAllWeekPeriods.filter(p => 
-          p.staff_enrollment_id === period_config.staff_enrollment_id &&
+          p.staff_enrollment_id && allEnrollmentIds.includes(p.staff_enrollment_id) &&
           sameDayConfigIds!.includes(p.class_day_config_id) &&
           p.start_time !== null &&
           p.end_time !== null &&
           (!period_config.id || p.id !== period_config.id)
         )
       : await PeriodsConfig.query()
-          .where('staff_enrollment_id', period_config.staff_enrollment_id!)
+          .whereIn('staff_enrollment_id', allEnrollmentIds)
           .whereIn('class_day_config_id', sameDayConfigIds)
           .whereNotNull('start_time')
           .whereNotNull('end_time')
+          .preload('period_config_class_day', (q) => q.preload('class'))
+          .preload('division')
           .if(period_config.id, (query) => query.whereNot('id', period_config.id!));
 
     // 1. Check for time overlap
@@ -1368,10 +1390,14 @@ export default class TimeTableController {
       const existingEnd = this.timeToMinutes(period.end_time);
       
       if (newStart < existingEnd && newEnd > existingStart) {
+        const className = (period as any).period_config_class_day?.class?.class ? `Class/Year ${(period as any).period_config_class_day.class.class}` : '';
+        const divisionName = (period as any).division?.division ? `Div ${(period as any).division.division}` : '';
+        const locationStr = [className, divisionName].filter(Boolean).join(' ');
+        
         return {
           result: false,
           status: 'TEACHER_NOT_AVAILABLE',
-          message: `Teacher is already assigned to another period (${period.start_time} - ${period.end_time}) at this time.`
+          message: `Teacher is already assigned to another lecture${locationStr ? ` (${locationStr})` : ''} at this time slot (${period.start_time} - ${period.end_time}).`
         }
       }
     }
@@ -1391,18 +1417,17 @@ export default class TimeTableController {
     if (!weekConfigIds) {
       const allClassDayConfigs = await ClassDayConfig.query()
         .where('school_timetable_config_id', class_day_config.school_timetable_config_id)
-        .andWhere('class_id', class_day_config.class_id)
         .select('id');
       weekConfigIds = allClassDayConfigs.map(c => c.id);
     }
 
     const periodsForWeekCount = cachedAllWeekPeriods
       ? cachedAllWeekPeriods.filter(p =>
-          p.staff_enrollment_id === period_config.staff_enrollment_id &&
+          p.staff_enrollment_id && allEnrollmentIds.includes(p.staff_enrollment_id) &&
           weekConfigIds!.includes(p.class_day_config_id)
         ).length
       : Number((await PeriodsConfig.query()
-          .where('staff_enrollment_id', period_config.staff_enrollment_id!)
+          .whereIn('staff_enrollment_id', allEnrollmentIds)
           .whereIn('class_day_config_id', weekConfigIds)
           .count('* as total'))[0].$extras.total);
 
@@ -2062,11 +2087,11 @@ export default class TimeTableController {
       return ctx.response.notFound({ message: 'No timetable configuration found for this class and division.' })
     }
 
-    // Sort days chronologically
+    // Sort days chronologically and filter out invalid/empty day configs
     const dayOrder = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-    const dayConfigs = school_timetable_config.class_day_config.slice().sort((a, b) => {
-      return dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day)
-    })
+    const dayConfigs = (school_timetable_config.class_day_config || [])
+      .filter((dayConfig) => dayConfig.day && dayOrder.includes(dayConfig.day.toLowerCase()) && dayConfig.period_config && dayConfig.period_config.length > 0)
+      .sort((a, b) => dayOrder.indexOf(a.day.toLowerCase()) - dayOrder.indexOf(b.day.toLowerCase()))
 
     const dayMap: Record<string, string> = {
       mon: 'Monday',
@@ -2078,13 +2103,21 @@ export default class TimeTableController {
       sun: 'Sunday'
     }
 
-    // Calculate max periods in a day
+    // Calculate max periods in a day based on highest period_order (not array length)
     let maxPeriods = 0
     dayConfigs.forEach((dayConfig) => {
       if (dayConfig.period_config) {
-        maxPeriods = Math.max(maxPeriods, dayConfig.period_config.length)
+        dayConfig.period_config.forEach((period) => {
+          if (period.period_order) {
+            maxPeriods = Math.max(maxPeriods, period.period_order)
+          }
+        })
       }
     })
+
+    if (maxPeriods === 0) {
+      maxPeriods = 8
+    }
 
     // Construct headers
     const gridHeader = [
@@ -2096,7 +2129,8 @@ export default class TimeTableController {
 
     const gridBody: any[] = [gridHeader]
     dayConfigs.forEach((dayConfig) => {
-      const dayLabel = dayMap[dayConfig.day] || dayConfig.day.toUpperCase()
+      const dayKey = dayConfig.day.toLowerCase()
+      const dayLabel = dayMap[dayKey] || dayConfig.day.toUpperCase()
       const row: any[] = [
         { text: dayLabel, style: 'dayHeader', alignment: 'center', bold: true }
       ]
@@ -2104,63 +2138,74 @@ export default class TimeTableController {
       const periods = dayConfig.period_config.slice().sort((a, b) => a.period_order - b.period_order)
 
       for (let i = 1; i <= maxPeriods; i++) {
-        const period = periods.find(p => p.period_order === i)
-        if (!period) {
-          row.push({ text: '-', alignment: 'center', fontSize: 8, margin: [0, 10, 0, 10] })
+        const matchingPeriods = periods.filter(p => p.period_order === i)
+        if (matchingPeriods.length === 0) {
+          row.push({ text: '-', alignment: 'center', fontSize: 8, margin: [0, 4, 0, 4] })
           continue
         }
 
-        const timeStr = `${period.start_time} - ${period.end_time}`
-        let cellContent: any[] = [
-          { text: timeStr, fontSize: 7, color: '#475569', alignment: 'center', margin: [0, 0, 0, 4] }
-        ]
+        const cellContent: any[] = []
+        let fillColor = '#f8fafc'
 
-        if (period.is_break) {
-          cellContent.push({ text: 'BREAK', style: 'breakText', alignment: 'center', bold: true })
-        } else if (period.is_library) {
-          cellContent.push({ text: 'LIBRARY', style: 'libraryText', alignment: 'center', bold: true })
-        } else if (period.is_seminar) {
-          cellContent.push({ text: 'SEMINAR', style: 'seminarText', alignment: 'center', bold: true })
-        } else if (period.is_pt) {
-          cellContent.push({ text: 'PT', style: 'ptText', alignment: 'center', bold: true })
-        } else if (period.is_free_period) {
-          cellContent.push({ text: 'FREE', style: 'freeText', alignment: 'center', bold: true })
-        } else {
-          const subject = period.period_config_subject?.subject
-          const subjectName = subject ? subject.name : 'Unknown'
-          const subjectCode = period.period_config_subject?.code_for_division || subject?.code || ''
-          const subjectDisplay = subjectCode ? `${subjectName}\n(${subjectCode})` : subjectName
-
-          cellContent.push({ text: subjectDisplay, style: 'subjectText', alignment: 'center', bold: true })
-
-          const staff = period.staff_enrollment?.staff
-          if (staff) {
-            const teacherName = `${staff.first_name || ''} ${staff.last_name ? staff.last_name.charAt(0).toUpperCase() + '.' : ''}`.trim()
-            cellContent.push({ text: teacherName, style: 'teacherText', alignment: 'center', margin: [0, 2, 0, 0] })
+        matchingPeriods.forEach((period, idx) => {
+          if (idx > 0) {
+            cellContent.push({ text: '----------------', fontSize: 6, color: '#94a3b8', alignment: 'center', margin: [0, 1, 0, 1] })
           }
 
-          if (period.lab_id) {
-            const lab = school_timetable_config.lab_config?.find(l => l.id === period.lab_id)
-            if (lab) {
-              cellContent.push({ text: `Lab: ${lab.name}`, style: 'labText', alignment: 'center', margin: [0, 2, 0, 0] })
+          const timeStr = `${period.start_time || ''} - ${period.end_time || ''}`.trim()
+          if (timeStr && timeStr !== '-') {
+            cellContent.push({ text: timeStr, fontSize: 6.5, color: '#475569', alignment: 'center', margin: [0, 0, 0, 2] })
+          }
+
+          if (period.is_break) {
+            fillColor = '#fef3c7'
+            cellContent.push({ text: 'BREAK', style: 'breakText', alignment: 'center', bold: true })
+          } else if (period.is_library) {
+            fillColor = '#e0f2fe'
+            cellContent.push({ text: 'LIBRARY', style: 'libraryText', alignment: 'center', bold: true })
+          } else if (period.is_seminar) {
+            fillColor = '#f3e8ff'
+            cellContent.push({ text: 'SEMINAR', style: 'seminarText', alignment: 'center', bold: true })
+          } else if (period.is_pt) {
+            fillColor = '#f3e8ff'
+            cellContent.push({ text: 'PT', style: 'ptText', alignment: 'center', bold: true })
+          } else if (period.is_free_period) {
+            fillColor = '#f1f5f9'
+            cellContent.push({ text: 'FREE', style: 'freeText', alignment: 'center', bold: true })
+          } else {
+            if (period.batch_name) {
+              cellContent.push({ text: `[${period.batch_name}]`, fontSize: 7, color: '#1e40af', alignment: 'center', bold: true })
+            }
+
+            const subject = period.period_config_subject?.subject
+            const subjectName = subject ? subject.name : 'Unknown'
+            const subjectCode = period.period_config_subject?.code_for_division || subject?.code || ''
+            const subjectDisplay = subjectCode ? `${subjectName}\n(${subjectCode})` : subjectName
+
+            cellContent.push({ text: subjectDisplay, style: 'subjectText', alignment: 'center', bold: true })
+
+            const staff = period.staff_enrollment?.staff
+            if (staff) {
+              const teacherName = `${staff.first_name || ''} ${staff.last_name ? staff.last_name.charAt(0).toUpperCase() + '.' : ''}`.trim()
+              cellContent.push({ text: teacherName, style: 'teacherText', alignment: 'center', margin: [0, 1, 0, 0] })
+            }
+
+            if (period.lab_id) {
+              const lab = school_timetable_config.lab_config?.find(l => l.id === period.lab_id)
+              if (lab) {
+                cellContent.push({ text: `Lab: ${lab.name}`, style: 'labText', alignment: 'center', margin: [0, 1, 0, 0] })
+              }
+              fillColor = '#dbeafe'
+            } else {
+              fillColor = '#dcfce7'
             }
           }
-        }
-
-        // Determine background colors to fit premium design
-        let fillColor = '#f8fafc'
-        if (period.is_break) fillColor = '#fef3c7'
-        else if (period.is_library) fillColor = '#e0f2fe'
-        else if (period.is_seminar) fillColor = '#f3e8ff'
-        else if (period.is_pt) fillColor = '#f3e8ff'
-        else if (period.is_free_period) fillColor = '#f1f5f9'
-        else if (period.lab_id) fillColor = '#dbeafe'
-        else fillColor = '#dcfce7'
+        })
 
         row.push({
           stack: cellContent,
           fillColor,
-          margin: [2, 6, 2, 6]
+          margin: [1, 3, 1, 3]
         })
       }
       gridBody.push(row)
@@ -2185,28 +2230,26 @@ export default class TimeTableController {
 
     const docDefinition: any = {
       pageOrientation: 'landscape',
-      pageMargins: [30, 30, 30, 30],
+      pageMargins: [20, 20, 20, 20],
       content: [
         // 1. Header: logo + college name
         {
           columns: [
             {
-              width: 70,
-              stack: [logoImage ? { image: logoImage, width: 60, height: 60, alignment: 'center' } : {
+              width: 60,
+              stack: [logoImage ? { image: logoImage, width: 50, height: 50, alignment: 'center' } : {
                 canvas: [
-                  { type: 'circle', x: 35, y: 30, r: 28, lineWidth: 1.5, lineColor: '#1e293b' },
-                  { type: 'circle', x: 35, y: 30, r: 24, lineWidth: 0.8, lineColor: '#1e293b' },
-                  { type: 'line', x1: 35, y1: 16, x2: 35, y2: 44, lineWidth: 2, lineColor: '#1e293b' },
-                  { type: 'line', x1: 21, y1: 30, x2: 49, y2: 30, lineWidth: 2, lineColor: '#1e293b' }
+                  { type: 'circle', x: 25, y: 25, r: 22, lineWidth: 1.5, lineColor: '#1e293b' },
+                  { type: 'circle', x: 25, y: 25, r: 18, lineWidth: 0.8, lineColor: '#1e293b' }
                 ],
-                width: 70,
-                height: 62
+                width: 50,
+                height: 50
               }]
             },
             {
               width: '*',
               stack: schoolTitleContent,
-              margin: [-30, 10, 0, 0]
+              margin: [-20, 5, 0, 0]
             }
           ],
           margin: [0, 0, 0, 4]
@@ -2214,10 +2257,10 @@ export default class TimeTableController {
         // Divider
         {
           canvas: [
-            { type: 'rect', x: 0, y: 0, w: 781, h: 1.5, color: '#1e293b' },
-            { type: 'rect', x: 0, y: 4, w: 781, h: 0.5, color: '#1e293b' }
+            { type: 'rect', x: 0, y: 0, w: 801, h: 1.5, color: '#1e293b' },
+            { type: 'rect', x: 0, y: 3, w: 801, h: 0.5, color: '#1e293b' }
           ],
-          margin: [0, 4, 0, 8]
+          margin: [0, 2, 0, 6]
         },
         // 2. Class details section
         {
@@ -2237,23 +2280,23 @@ export default class TimeTableController {
                     { text: 'Academic Year: ', bold: true },
                     { text: `${academic_session_id || ''}` }
                   ],
-                  alignment: 'center', margin: [0, 2, 0, 2], fontSize: 9
+                  alignment: 'center', margin: [0, 1, 0, 1], fontSize: 8.5
                 }
               ],
-              margin: [8, 4, 8, 4]
+              margin: [6, 2, 6, 2]
             }]]
           },
           layout: {
             hLineWidth: () => 1, vLineWidth: () => 1,
             hLineColor: () => '#94a3b8', vLineColor: () => '#94a3b8'
           },
-          margin: [0, 0, 0, 10]
+          margin: [0, 0, 0, 6]
         },
         // 3. Grid table
         {
           table: {
             headerRows: 1,
-            widths: ['8%', ...Array(maxPeriods).fill('*')],
+            widths: ['9%', ...Array(maxPeriods).fill('*')],
             body: gridBody
           },
           layout: {
@@ -2261,28 +2304,28 @@ export default class TimeTableController {
             vLineWidth: (i: number, node: any) => (i === 0 || i === node.table.widths.length) ? 1 : 0.5,
             hLineColor: () => '#475569',
             vLineColor: () => '#475569',
-            paddingLeft: () => 4,
-            paddingRight: () => 4,
-            paddingTop: () => 4,
-            paddingBottom: () => 4
+            paddingLeft: () => 2,
+            paddingRight: () => 2,
+            paddingTop: () => 2,
+            paddingBottom: () => 2
           },
-          margin: [0, 0, 0, 8]
+          margin: [0, 0, 0, 6]
         }
       ],
       styles: {
-        collegeTitle:    { fontSize: 13, bold: true, color: '#1e293b' },
-        collegeAmpersand:{ fontSize: 11, bold: true, color: '#1e293b' },
-        detailsSubject:  { fontSize: 11, bold: true, color: '#1e293b' },
+        collegeTitle:    { fontSize: 12, bold: true, color: '#1e293b' },
+        collegeAmpersand:{ fontSize: 10, bold: true, color: '#1e293b' },
+        detailsSubject:  { fontSize: 10, bold: true, color: '#1e293b' },
         tableHeader:     { bold: true, fontSize: 8, color: '#0f172a', fillColor: '#f1f5f9' },
         dayHeader:       { fontSize: 8, color: '#1e293b' },
-        breakText:       { fontSize: 8, color: '#b45309' },
-        ptText:          { fontSize: 8, color: '#6b21a8' },
-        freeText:        { fontSize: 8, color: '#475569' },
-        subjectText:     { fontSize: 8, color: '#0f172a' },
-        teacherText:     { fontSize: 7, color: '#334155' },
-        labText:         { fontSize: 7, color: '#1e3a8a' }
+        breakText:       { fontSize: 7.5, color: '#b45309' },
+        ptText:          { fontSize: 7.5, color: '#6b21a8' },
+        freeText:        { fontSize: 7.5, color: '#475569' },
+        subjectText:     { fontSize: 7.5, color: '#0f172a' },
+        teacherText:     { fontSize: 6.5, color: '#334155' },
+        labText:         { fontSize: 6.5, color: '#1e3a8a' }
       },
-      defaultStyle: { font: 'Roboto', fontSize: 8 }
+      defaultStyle: { font: 'Roboto', fontSize: 7.5 }
     }
 
     const printer = new PdfPrinter(fonts, fs as any, { resolve: () => { }, resolved: () => Promise.resolve() })

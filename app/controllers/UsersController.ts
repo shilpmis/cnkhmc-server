@@ -371,6 +371,18 @@ export default class UsersController {
         .where('performed_by', user.id)
         .delete()
 
+      await db
+        .from('staff_leave_applications')
+        .useTransaction(trx)
+        .where('applied_by', user.id)
+        .update({ applied_by: null })
+
+      await db
+        .from('staff_leave_applications')
+        .useTransaction(trx)
+        .where('approved_by', user.id)
+        .update({ approved_by: null })
+
       // 3. Delete the user
       user.useTransaction(trx)
       await user.delete()

@@ -533,7 +533,7 @@ export default class StaffAttendanceController {
           })
         })
         .preload('requester', (query) => {
-          query.select('id', 'first_name', 'last_name')
+          query.select('id', 'name')
         })
         .orderBy('created_at', 'desc')
         .paginate(page, perPage)

@@ -19,6 +19,11 @@ export default class AuthMiddleware {
       guards?: (keyof Authenticators)[]
     } = {}
   ) {
+    const queryToken = ctx.request.input('token') || ctx.request.input('access_token')
+    if (!ctx.request.header('authorization') && queryToken) {
+      ctx.request.request.headers['authorization'] = `Bearer ${queryToken}`
+    }
+
     await ctx.auth.authenticateUsing(options.guards, { loginRoute: this.redirectTo })
     return next()
   }

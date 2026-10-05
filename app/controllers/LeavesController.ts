@@ -6,6 +6,7 @@ import LeaveApprovalHierarchy from '#models/LeaveApprovalHierarchy'
 import StaffLeaveApplication from '#models/StaffLeaveApplication'
 import StaffLeaveBalance from '#models/StaffLeaveBalance'
 import CompOffRequest from '#models/CompOffRequest'
+import AcademicCalendarSetting from '#models/AcademicCalendarSetting'
 import {
   CreateValidatorForLeaveApplication,
   CreateValidatorForLeavePolicies,
@@ -359,6 +360,140 @@ export default class LeavesController {
     return ctx.response.status(200).json({ message: 'Leave type deleted successfully' })
   }
 
+  private async calculateSandwichLeaveDays(
+    staffId: number,
+    startDate: DateTime,
+    endDate: DateTime,
+    academicSessionId?: number,
+    excludeApplicationId?: string
+  ): Promise<number> {
+    let isSaturdayWorking = true
+    const nonWorkingDates = new Set<string>()
+
+    if (academicSessionId) {
+      const calSetting = await AcademicCalendarSetting.findBy('academic_year', academicSessionId)
+      if (calSetting) {
+        isSaturdayWorking = calSetting.is_saturday_working !== false
+        const rawDates = calSetting.non_working_dates || []
+        for (const item of rawDates) {
+          if (typeof item === 'string' && item.trim().startsWith('{')) {
+            try {
+              const parsed = JSON.parse(item)
+              if (parsed.date && parsed.isWorkingDay === false) {
+                nonWorkingDates.add(parsed.date)
+              }
+            } catch {}
+          } else if (item) {
+            nonWorkingDates.add(String(item).split('T')[0])
+          }
+        }
+      }
+    }
+
+    const isDayWorking = (d: DateTime): boolean => {
+      const dateStr = d.toISODate()
+      if (d.weekday === 7) return false
+      if (d.weekday === 6 && !isSaturdayWorking) return false
+      if (dateStr && nonWorkingDates.has(dateStr)) return false
+      return true
+    }
+
+    let firstWorkingDayInRange: DateTime | null = null
+    let lastWorkingDayInRange: DateTime | null = null
+
+    let current = startDate
+    while (current <= endDate) {
+      if (isDayWorking(current)) {
+        if (!firstWorkingDayInRange) firstWorkingDayInRange = current
+        lastWorkingDayInRange = current
+      }
+      current = current.plus({ days: 1 })
+    }
+
+    let numberOfDays = 0
+    current = startDate
+    while (current <= endDate) {
+      if (isDayWorking(current)) {
+        numberOfDays++
+      } else {
+        // Under Sandwich Leave Policy, any non-working days (Saturdays, Sundays, holidays)
+        // that are part of or sandwiched within a leave range (e.g. Friday to Monday, or Friday to Sunday) count as leave days.
+        const isSandwichedInside =
+          firstWorkingDayInRange &&
+          lastWorkingDayInRange &&
+          current > firstWorkingDayInRange &&
+          current < lastWorkingDayInRange
+
+        const isSandwichedRange =
+          (firstWorkingDayInRange && current > firstWorkingDayInRange) ||
+          (lastWorkingDayInRange && current < lastWorkingDayInRange)
+
+        if (isSandwichedInside || isSandwichedRange) {
+          numberOfDays++
+        }
+      }
+      current = current.plus({ days: 1 })
+    }
+
+    // Check adjacent leave applications for the same staff member to enforce Sandwich Leave
+    // when leaves are submitted as separate requests (e.g. Friday in one app, Monday in another app)
+    if (staffId) {
+      const query = db
+        .from('staff_leave_applications')
+        .where('staff_id', staffId)
+        .whereIn('status', ['approved', 'pending'])
+
+      if (excludeApplicationId) {
+        query.whereNot('uuid', excludeApplicationId)
+      }
+
+      const existingLeaves = await query
+
+      // Check preceding working day before startDate
+      let prevCheck = startDate.minus({ days: 1 })
+      let gapDaysBefore = 0
+      while (prevCheck >= startDate.minus({ days: 10 }) && !isDayWorking(prevCheck)) {
+        gapDaysBefore++
+        prevCheck = prevCheck.minus({ days: 1 })
+      }
+
+      const hasWorkingLeaveBefore =
+        gapDaysBefore > 0 &&
+        isDayWorking(prevCheck) &&
+        existingLeaves.some((l: any) => {
+          const lFrom = DateTime.fromJSDate(new Date(l.from_date))
+          const lTo = DateTime.fromJSDate(new Date(l.to_date))
+          return prevCheck >= lFrom && prevCheck <= lTo
+        })
+
+      // Check succeeding working day after endDate
+      let nextCheck = endDate.plus({ days: 1 })
+      let gapDaysAfter = 0
+      while (nextCheck <= endDate.plus({ days: 10 }) && !isDayWorking(nextCheck)) {
+        gapDaysAfter++
+        nextCheck = nextCheck.plus({ days: 1 })
+      }
+
+      const hasWorkingLeaveAfter =
+        gapDaysAfter > 0 &&
+        isDayWorking(nextCheck) &&
+        existingLeaves.some((l: any) => {
+          const lFrom = DateTime.fromJSDate(new Date(l.from_date))
+          const lTo = DateTime.fromJSDate(new Date(l.to_date))
+          return nextCheck >= lFrom && nextCheck <= lTo
+        })
+
+      if (hasWorkingLeaveBefore) {
+        numberOfDays += gapDaysBefore
+      }
+      if (hasWorkingLeaveAfter) {
+        numberOfDays += gapDaysAfter
+      }
+    }
+
+    return numberOfDays
+  }
+
   private async validateLeaveRequest(payload: any, leavePolicy: LeavePolicies) {
     let numberOfDays = 0
 
@@ -406,15 +541,10 @@ export default class LeavesController {
       }
       numberOfDays = 0.5
     } else {
-      // Calculate business days excluding weekends
-      let current = startDate
-      while (current <= endDate) {
-        if (current.weekday <= 5) {
-          // Monday = 1, Friday = 5
-          numberOfDays++
-        }
-        current = current.plus({ days: 1 })
-      }
+      // Calculate sandwich leave days respecting academic calendar settings and adjacent leaves
+      const academicSessionId = payload.academic_session_id || payload.academic_year || (leavePolicy as any)?.academic_year || (leavePolicy as any)?.academic_session_id
+      const staffId = payload.staff_id
+      numberOfDays = await this.calculateSandwichLeaveDays(staffId, startDate, endDate, academicSessionId)
     }
 
     // Validate against max consecutive days
@@ -492,14 +622,10 @@ export default class LeavesController {
       }
       numberOfDays = 0.5
     } else {
-      // Calculate business days excluding weekends
-      let current = startDate
-      while (current <= endDate) {
-        if (current.weekday <= 5) {
-          numberOfDays++
-        }
-        current = current.plus({ days: 1 })
-      }
+      // Calculate sandwich leave days respecting academic calendar settings and adjacent leaves
+      const academicSessionId = payload.academic_session_id || payload.academic_year || (leavePolicy as any)?.academic_year || (leavePolicy as any)?.academic_session_id
+      const staffId = payload.staff_id || existingLeave.staff_id
+      numberOfDays = await this.calculateSandwichLeaveDays(staffId, startDate, endDate, academicSessionId, existingLeave.uuid)
     }
 
     // Validate against max consecutive days

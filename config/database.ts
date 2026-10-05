@@ -12,6 +12,13 @@ const dbConfig = defineConfig({
         user: process.env.DB_USER || env.get('DB_USER'),
         password: process.env.DB_PASSWORD || env.get('DB_PASSWORD'),
         database: process.env.DB_DATABASE || env.get('DB_DATABASE'),
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000,
+      },
+      pool: {
+        min: 2,
+        max: 10,
+        idleTimeoutMillis: 30000,
       },
       migrations: {
         naturalSort: true,

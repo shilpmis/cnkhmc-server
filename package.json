@@ -70,6 +70,7 @@
         "jsonwebtoken": "^9.0.2",
         "luxon": "^3.5.0",
         "mysql2": "^3.22.5",
+        "pdf-parse": "^2.4.5",
         "pdfmake": "^0.3.7",
         "reflect-metadata": "^0.2.2",
         "strtok3": "6.3.0",

@@ -46,6 +46,7 @@ import DeadStockTransactionsController from '#controllers/dead_stock_transaction
 import InventoryDepartmentsController from '#controllers/inventory_departments_controller'
 import PayrollSettingsController from '#controllers/payroll_settings_controller'
 import PracticalBatchSettingsController from '#controllers/PracticalBatchSettingsController'
+import StudentColumnSettingsController from '#controllers/StudentColumnSettingsController'
 import LectureAttendanceController from '#controllers/LectureAttendanceController'
 import AcademicSessionsController from '#controllers/AcademicSessionsController'
 import HostelsController from '#controllers/hostels_controller'
@@ -281,6 +282,10 @@ router
     router.get('/practical-batch-settings', [PracticalBatchSettingsController, 'getSettings'])
     router.put('/practical-batch-settings', [PracticalBatchSettingsController, 'updateSettings'])
 
+    // student column settings (import/export headers)
+    router.get('/student-column-settings', [StudentColumnSettingsController, 'getSettings'])
+    router.put('/student-column-settings', [StudentColumnSettingsController, 'updateSettings'])
+
     router.get('/payroll/salary-template', [PayrollController, 'indexSalaryTemplates'])
     router.get('/payroll/salary-template/:template_id', [
       PayrollController,
@@ -489,6 +494,10 @@ router
     router.get('lesson-plans/export/:subjectId/:lpNumber', [LessonPlanController, 'exportLP'])
 
     // Daily Diaries
+    router.get('daily-diaries/export-pdf', [DailyDiaryController, 'exportPDF'])
+    router.get('daily-diaries/manual', [DailyDiaryController, 'getManualLogs'])
+    router.post('daily-diaries/manual', [DailyDiaryController, 'storeManual'])
+    router.delete('daily-diaries/manual/:id', [DailyDiaryController, 'deleteManualLog'])
     router.get('daily-diaries', [DailyDiaryController, 'getLogsByDateRange'])
     router.post('daily-diaries', [DailyDiaryController, 'store'])
 
@@ -526,6 +535,8 @@ router
     // Dead Stock Management
     router.get('dead-stocks', [DeadStocksController, 'index'])
     router.post('dead-stocks', [DeadStocksController, 'store'])
+    router.post('dead-stocks/import', [DeadStocksController, 'importExcel'])
+    router.get('dead-stocks/template', [DeadStocksController, 'downloadTemplate'])
     router.get('dead-stocks/:id', [DeadStocksController, 'show'])
 
     // Dead Stock Transactions
