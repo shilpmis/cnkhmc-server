@@ -43,10 +43,19 @@ export const CreateValidatorStundet = vine.compile(
         .optional(),
 
       is_active: vine.boolean().nullable().optional(),
+      profile_photo: vine.string().trim().nullable().optional(),
       remarks: vine.string().trim().nullable().optional(),
       student_type: vine.enum(['SCHOOL', 'COLLEGE']).nullable().optional(),
       practical_batch: vine.string().trim().nullable().optional(),
+      first_year_roll_number: vine.number().positive().nullable().optional(),
+      second_year_roll_number: vine.number().positive().nullable().optional(),
+      third_year_roll_number: vine.number().positive().nullable().optional(),
+      fourth_year_roll_number: vine.number().positive().nullable().optional(),
+      quota_id: vine.number().nullable().optional(),
+      fees_plan_id: vine.number().nullable().optional(),
     }),
+    quota_id: vine.number().nullable().optional(),
+    fees_plan_id: vine.number().nullable().optional(),
     student_meta_data: vine.object({
       aadhar_dise_no: vine
         .number()
@@ -197,6 +206,13 @@ export const CreateValidatorStundet = vine.compile(
       quota_fees: vine.string().trim().nullable().optional(),
       activity_house: vine.string().trim().nullable().optional(),
       bank_branch_name: vine.string().trim().nullable().optional(),
+      name_as_per_aadhar: vine.string().trim().nullable().optional(),
+      admission_quota: vine.string().trim().nullable().optional(),
+      university_spid_no: vine.string().trim().nullable().optional(),
+      admission_category: vine.string().trim().nullable().optional(),
+      tuition_fees: vine.string().trim().nullable().optional(),
+      roll_no_internship: vine.string().trim().nullable().optional(),
+      bank_branch_pincode: vine.string().trim().nullable().optional(),
     }),
   })
 )
@@ -205,14 +221,15 @@ export const CreateValidatorForUpload = vine.compile(
   vine.object({
     students_data: vine.object({
       school_id: vine.number(),
+      admission_number: vine.string().trim().maxLength(50).nullable().optional(),
       enrollment_code: vine.string().trim().maxLength(100).unique({ table: 'students', column: 'enrollment_code' }).nullable().optional(),
-      first_name: vine.string().trim().minLength(2).maxLength(50),
-      middle_name: vine.string().trim().optional(),
-      last_name: vine.string().trim().minLength(2).maxLength(50),
+      first_name: vine.string().trim().maxLength(50).nullable().optional(),
+      middle_name: vine.string().trim().nullable().optional(),
+      last_name: vine.string().trim().maxLength(50).nullable().optional(),
 
-      first_name_in_guj: vine.string().trim().nullable(),
-      middle_name_in_guj: vine.string().trim().nullable(),
-      last_name_in_guj: vine.string().trim().nullable(),
+      first_name_in_guj: vine.string().trim().nullable().optional(),
+      middle_name_in_guj: vine.string().trim().nullable().optional(),
+      last_name_in_guj: vine.string().trim().nullable().optional(),
 
       gender: vine.enum(['Male', 'Female']).nullable().optional(),
 
@@ -223,7 +240,7 @@ export const CreateValidatorForUpload = vine.compile(
        */
       gr_no: vine.number().positive().nullable().optional(),
 
-      primary_mobile: vine.number(),
+      primary_mobile: vine.number().nullable().optional(),
 
       father_name: vine.string().trim().maxLength(100).nullable().optional(),
       father_name_in_guj: vine.string().trim().nullable().optional(),
@@ -243,16 +260,14 @@ export const CreateValidatorForUpload = vine.compile(
       aadhar_no: vine.number().nullable().optional(),
 
       is_active: vine.boolean().nullable().optional(),
+      profile_photo: vine.string().trim().nullable().optional(),
       student_type: vine.enum(['SCHOOL', 'COLLEGE']).optional(),
       practical_batch: vine.string().trim().nullable().optional(),
     }),
     student_meta_data: vine
       .object({
-        aadhar_dise_no: vine
-          .number()
-          // .unique({ table: 'students_meta', column: 'aadhar_dise_no' })
-          .nullable()
-          .optional(),
+        // 18 digits, more than a number can hold exactly: it is read and stored as text
+        aadhar_dise_no: vine.string().trim().maxLength(30).nullable().optional(),
 
         birth_place: vine.string().trim().maxLength(100).nullable().optional(),
         birth_place_in_guj: vine.string().trim().nullable().optional(),
@@ -281,9 +296,9 @@ export const CreateValidatorForUpload = vine.compile(
 
         state: vine.string().trim().maxLength(100).nullable().optional(),
 
-        postal_code: vine.string().trim().nullable(),
+        postal_code: vine.string().trim().nullable().optional(),
 
-        bank_name: vine.string().trim().nullable(),
+        bank_name: vine.string().trim().nullable().optional(),
 
         account_no: vine.number().positive().nullable().optional(),
 
@@ -384,6 +399,13 @@ export const CreateValidatorForUpload = vine.compile(
         quota_fees: vine.string().trim().nullable().optional(),
         activity_house: vine.string().trim().nullable().optional(),
         bank_branch_name: vine.string().trim().nullable().optional(),
+        name_as_per_aadhar: vine.string().trim().nullable().optional(),
+        admission_quota: vine.string().trim().nullable().optional(),
+        university_spid_no: vine.string().trim().nullable().optional(),
+        admission_category: vine.string().trim().nullable().optional(),
+        tuition_fees: vine.string().trim().nullable().optional(),
+        roll_no_internship: vine.string().trim().nullable().optional(),
+        bank_branch_pincode: vine.string().trim().nullable().optional(),
       })
       .optional(),
   })
@@ -534,8 +556,16 @@ export const UpdateValidatorForStundets = vine.compile(
         is_active: vine.boolean().nullable().optional(),
         class_id: vine.number().optional(),
         practical_batch: vine.string().trim().nullable().optional(),
+        first_year_roll_number: vine.number().positive().nullable().optional(),
+        second_year_roll_number: vine.number().positive().nullable().optional(),
+        third_year_roll_number: vine.number().positive().nullable().optional(),
+        fourth_year_roll_number: vine.number().positive().nullable().optional(),
+        quota_id: vine.number().nullable().optional(),
+        fees_plan_id: vine.number().nullable().optional(),
       })
       .optional(),
+    quota_id: vine.number().nullable().optional(),
+    fees_plan_id: vine.number().nullable().optional(),
 
     student_meta_data: vine
       .object({
@@ -682,6 +712,13 @@ export const UpdateValidatorForStundets = vine.compile(
         quota_fees: vine.string().trim().nullable().optional(),
         activity_house: vine.string().trim().nullable().optional(),
         bank_branch_name: vine.string().trim().nullable().optional(),
+        name_as_per_aadhar: vine.string().trim().nullable().optional(),
+        admission_quota: vine.string().trim().nullable().optional(),
+        university_spid_no: vine.string().trim().nullable().optional(),
+        admission_category: vine.string().trim().nullable().optional(),
+        tuition_fees: vine.string().trim().nullable().optional(),
+        roll_no_internship: vine.string().trim().nullable().optional(),
+        bank_branch_pincode: vine.string().trim().nullable().optional(),
       })
       .optional(),
   })
@@ -725,4 +762,6 @@ export const createStudentValidatorForOnBoarding = vine.compile(
       primary_mobile : vine.number(),
       father_name: vine.string().trim().minLength(3).maxLength(50).nullable().optional(),
       academic_year : vine.number(),
+      quota_id: vine.number().nullable().optional(),
+      fees_plan_id: vine.number().nullable().optional(),
   }))

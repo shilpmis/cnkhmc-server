@@ -121,7 +121,9 @@ export default class extends BaseSeeder {
           "MARK_ATTENDANCE",
           "MANAGE_ADMISSION",
           "MANAGE_TIMETABLE",
-          "MANAGE_LESSON_PLAN"
+          "MANAGE_LESSON_PLAN",
+          "MANAGE_HOSTEL",
+          "MANAGE_INVENTORY"
         ])
       },
       {

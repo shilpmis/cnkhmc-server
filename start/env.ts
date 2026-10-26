@@ -47,4 +47,24 @@ export default await Env.create(new URL('../', import.meta.url), {
   DO_SPACES_BUCKET: Env.schema.string.optional(),
   DO_SPACES_REGION: Env.schema.string.optional(),
   DO_SPACES_CDN_URL: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------
+  | Kavacha file encryption (see app/services/kavacha_cipher.ts)
+  |----------------------------------------------------------
+  | KAVACHA_KEYRING is JSON: {"1":"<base64 of 32 random bytes>"}. Add a new version to rotate.
+  */
+  KAVACHA_KEYRING: Env.schema.string.optional(),
+  KAVACHA_ACTIVE_VERSION: Env.schema.number.optional(),
+  KAVACHA_INDEX_VERSION: Env.schema.number.optional(),
+
+  /*
+  |----------------------------------------------------------
+  | Database connection limits (one bug must not flood MySQL)
+  |----------------------------------------------------------
+  */
+  DB_POOL_MIN: Env.schema.number.optional(),
+  DB_POOL_MAX: Env.schema.number.optional(),
+  DB_QUERY_TIMEOUT_MS: Env.schema.number.optional(),
+  PUBLIC_API_URL: Env.schema.string.optional(),
 })

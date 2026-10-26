@@ -14,6 +14,7 @@ import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 import fs from 'node:fs'
 import path from 'node:path'
+import SpacesService from '#services/SpacesService'
 
 const fonts = {
   Roboto: {
@@ -2330,11 +2331,29 @@ export default class TimeTableController {
 
     const printer = new PdfPrinter(fonts, fs as any, { resolve: () => { }, resolved: () => Promise.resolve() })
     const pdfDoc = await (printer as any).createPdfKitDocument(docDefinition)
+    const chunks: Buffer[] = []
+    pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk))
+    const pdfBufferPromise = new Promise<Buffer>((resolve, reject) => {
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)))
+      pdfDoc.on('error', reject)
+    })
     pdfDoc.end()
+    const pdfBuffer = await pdfBufferPromise
+
+    const filename = `Timetable-Class_${classRow?.class || ''}-${division?.division || ''}.pdf`
+
+    // Upload to DigitalOcean Spaces
+    try {
+      const uploadResult = await SpacesService.uploadExport('timetable', filename, pdfBuffer)
+      response.header('x-cloud-url', uploadResult.url)
+      response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+    } catch (e) {
+      console.error('[TimeTableController] Failed to upload export to Spaces:', e)
+    }
 
     response.header('Content-Type', 'application/pdf')
-    response.header('Content-Disposition', `attachment; filename="Timetable-Class_${classRow?.class || ''}-${division?.division || ''}.pdf"`)
-    return response.stream(pdfDoc)
+    response.header('Content-Disposition', `attachment; filename="${filename}"`)
+    return response.send(pdfBuffer)
   }
 }
 

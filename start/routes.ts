@@ -46,13 +46,15 @@ import DeadStockTransactionsController from '#controllers/dead_stock_transaction
 import InventoryDepartmentsController from '#controllers/inventory_departments_controller'
 import PayrollSettingsController from '#controllers/payroll_settings_controller'
 import PracticalBatchSettingsController from '#controllers/PracticalBatchSettingsController'
-import StudentColumnSettingsController from '#controllers/StudentColumnSettingsController'
 import LectureAttendanceController from '#controllers/LectureAttendanceController'
 import AcademicSessionsController from '#controllers/AcademicSessionsController'
 import HostelsController from '#controllers/hostels_controller'
 import HostelRoomsController from '#controllers/hostel_rooms_controller'
 import HostelAllocationsController from '#controllers/hostel_allocations_controller'
 import CertificateTemplatesController from '#controllers/certificate_templates_controller'
+import FeeReceiptTemplatesController from '#controllers/fee_receipt_templates_controller'
+import NonLectureTemplatesController from '#controllers/non_lecture_templates_controller'
+import NonLecturePlansController from '#controllers/non_lecture_plans_controller'
 import ExamMastersController from '#controllers/exam_masters_controller'
 import ExamSchedulesController from '#controllers/exam_schedules_controller'
 import ExamSubjectsController from '#controllers/exam_subjects_controller'
@@ -60,9 +62,19 @@ import PoliciesController from '#controllers/policies_controller'
 import AdmissionsController from '#controllers/AdmissionController'
 import StaffCertificatesController from '#controllers/StaffCertificatesController'
 import StudentCertificatesController from '#controllers/StudentCertificatesController'
+import StorageController from '#controllers/StorageController'
+import SanjayaController from '#controllers/sanjaya_controller'
+import app from '@adonisjs/core/services/app'
 
 router.get('/', async () => {
   return { status: 'ok', message: 'Server is running' }
+})
+
+// Static file fallback for local uploads
+router.get('/uploads/*', async ({ request, response }) => {
+  const segments = request.param('*')
+  const filePath = Array.isArray(segments) ? segments.join('/') : segments
+  return response.download(app.publicPath(`uploads/${filePath}`))
 })
 
 router
@@ -72,6 +84,7 @@ router
     router.post('/reset-password', [AuthController, 'resetPassword'])
   })
   .prefix('/api/v1/')
+  .use(middleware.rateLimit({ name: 'auth', max: 10, windowSec: 60, by: 'ip' }))
 
 router
   .group(() => {
@@ -127,6 +140,14 @@ router
     router.post('/user/onboard/staff', [UsersController, 'onBoardStaffAsUser'])
     router.put('/user/onboard/staff/:user_id', [UsersController, 'UpdateOnBoardedStaff'])
 
+    // Permission Templates / Policies routes (AWS IAM style)
+    router.get('/policies', [PoliciesController, 'index'])
+    router.post('/policies', [PoliciesController, 'store'])
+    router.get('/policies/:id', [PoliciesController, 'show'])
+    router.put('/policies/:id', [PoliciesController, 'update'])
+    router.delete('/policies/:id', [PoliciesController, 'destroy'])
+    router.post('/users/:userId/policies', [PoliciesController, 'assignToUser'])
+
     router.get('/classes/:school_id', [ClassesController, 'indexClassesForSchool'])
     router.post('/class/base', [ClassesController, 'createClass'])
     router.post('/classes', [ClassesController, 'createMultipleClasses'])
@@ -149,8 +170,8 @@ router
       StundetsController,
       'indexClassStudents',
     ])
-    router.get('student/:student_id', [StundetsController, 'fetchStudent'])
     router.get('student/detail/:student_id', [StundetsController, 'fetchStudentInDetail'])
+    router.get('student/:student_id', [StundetsController, 'fetchStudent'])
     router.get('students/:class_id', [StundetsController, 'indexClassStudents'])
     router.get('student/:school_id/:student_id', [StundetsController, 'fetchStudent'])
     router.post('student', [StundetsController, 'createSingleStudent'])
@@ -283,8 +304,6 @@ router
     router.put('/practical-batch-settings', [PracticalBatchSettingsController, 'updateSettings'])
 
     // student column settings (import/export headers)
-    router.get('/student-column-settings', [StudentColumnSettingsController, 'getSettings'])
-    router.put('/student-column-settings', [StudentColumnSettingsController, 'updateSettings'])
 
     router.get('/payroll/salary-template', [PayrollController, 'indexSalaryTemplates'])
     router.get('/payroll/salary-template/:template_id', [
@@ -362,6 +381,22 @@ router
     router.get('/fees/status/student/:student_id', [
       FeesController,
       'fetchFeesStatusForSingleStudent',
+    ])
+    router.get('/fees/statement/:student_id', [
+      FeesController,
+      'generateStudentFinancialStatement',
+    ])
+    router.post('/fees/statement/:student_id/export-excel', [
+      FeesController,
+      'exportStudentFinancialStatementExcel',
+    ])
+    router.get('/fees/statement/:student_id/export-excel', [
+      FeesController,
+      'exportStudentFinancialStatementExcel',
+    ])
+    router.post('/fees/lock-template', [
+      FeesController,
+      'lockStudentFeeTemplate',
     ])
     // router.post('/fees/pay/:student_id', [FeesController, 'payFees'])
     router.post('/fees/pay/installments', [FeesController, 'payMultipleInstallments'])
@@ -566,6 +601,7 @@ router
     router.post('lecture-attendance', [LectureAttendanceController, 'markAttendance'])
 
     // ── Hostel Management Routes ──────────────────────────────────────────────
+    router.get('hostels/export/report', [HostelsController, 'exportReport'])
     router.get('hostels', [HostelsController, 'index'])
     router.post('hostels', [HostelsController, 'store'])
     router.get('hostels/:id', [HostelsController, 'show'])
@@ -586,6 +622,37 @@ router
     router.put('certificate-templates/:id', [CertificateTemplatesController, 'update'])
     router.delete('certificate-templates/:id', [CertificateTemplatesController, 'destroy'])
     router.get('certificate-templates/0/generate/:student_id', [CertificateTemplatesController, 'generate'])
+
+    // Fee Receipt Templates
+    router.get('fee-receipt-templates', [FeeReceiptTemplatesController, 'index'])
+    router.post('fee-receipt-templates', [FeeReceiptTemplatesController, 'store'])
+    router.get('fee-receipt-templates/:id', [FeeReceiptTemplatesController, 'show'])
+    router.put('fee-receipt-templates/:id', [FeeReceiptTemplatesController, 'update'])
+    router.delete('fee-receipt-templates/:id', [FeeReceiptTemplatesController, 'destroy'])
+
+    // Non-Lecture Lesson Plan Templates & Teacher Work
+    router.get('non-lecture-templates/my-sessions', [NonLectureTemplatesController, 'getMyAssignedSessions'])
+    router.get('non-lecture-templates/logs', [NonLectureTemplatesController, 'getLogs'])
+    router.post('non-lecture-templates/log-activity', [NonLectureTemplatesController, 'logActivity'])
+    router.delete('non-lecture-templates/logs/:id', [NonLectureTemplatesController, 'deleteLog'])
+    router.post('non-lecture-templates/assign', [NonLectureTemplatesController, 'assignTeachers'])
+    router.delete('non-lecture-templates/assignments/:id', [NonLectureTemplatesController, 'removeAssignment'])
+    router.get('non-lecture-templates/pdf-settings', [NonLectureTemplatesController, 'getPdfSettings'])
+    router.post('non-lecture-templates/pdf-settings', [NonLectureTemplatesController, 'savePdfSettings'])
+    // Non-lecture lesson plan (the heads sheet): view, save, upload, template, export
+    router.get('non-lecture-templates/by-subject/:subjectId', [NonLecturePlansController, 'forSubject'])
+    router.get('non-lecture-templates/plan-template',[NonLecturePlansController, 'downloadTemplate'])
+    router.get('non-lecture-templates/:id/plan', [NonLecturePlansController, 'getPlan'])
+    router.put('non-lecture-templates/:id/plan', [NonLecturePlansController, 'savePlan'])
+    router
+      .post('non-lecture-templates/:id/plan/upload', [NonLecturePlansController, 'uploadPlan'])
+      .use(middleware.rateLimit({ name: 'upload', max: 30, windowSec: 60 }))
+    router.get('non-lecture-templates/:id/plan/export', [NonLecturePlansController, 'exportPlan'])
+    router.get('non-lecture-templates', [NonLectureTemplatesController, 'index'])
+    router.post('non-lecture-templates', [NonLectureTemplatesController, 'store'])
+    router.get('non-lecture-templates/:id', [NonLectureTemplatesController, 'show'])
+    router.put('non-lecture-templates/:id', [NonLectureTemplatesController, 'update'])
+    router.delete('non-lecture-templates/:id', [NonLectureTemplatesController, 'destroy'])
 
     // Student Certificates Generation & Audit Logs
     router.post('students/:student_id/certificates/generate', [StudentCertificatesController, 'generateAndUpload'])
@@ -610,17 +677,36 @@ router
     router.put('exam-subjects/:id', [ExamSubjectsController, 'update'])
     router.delete('exam-subjects/:id', [ExamSubjectsController, 'destroy'])
 
-    // Policies
-    router.get('policies', [PoliciesController, 'index'])
-    router.post('policies', [PoliciesController, 'store'])
-    router.get('policies/:id', [PoliciesController, 'show'])
-    router.put('policies/:id', [PoliciesController, 'update'])
-    router.delete('policies/:id', [PoliciesController, 'destroy'])
-    router.post('policies/user/:userId', [PoliciesController, 'assignToUser'])
-
     // Admissions
     router.post('admissions/admit', [AdmissionsController, 'admitStudent'])
     router.get('admissions', [AdmissionsController, 'list'])
+
+    // ── Cloud Storage & Photos ───────────────────────────────────────────────
+    router.post('storage/upload-image', [StorageController, 'uploadImage']).use(middleware.rateLimit({ name: 'upload', max: 30, windowSec: 60 }))
+    router.post('storage/upload-export', [StorageController, 'uploadExport']).use(middleware.rateLimit({ name: 'upload', max: 30, windowSec: 60 }))
+
+    router.post('students/:student_id/photo', [StorageController, 'uploadStudentPhoto']).use(middleware.rateLimit({ name: 'upload', max: 30, windowSec: 60 }))
+    router.delete('students/:student_id/photo', [StorageController, 'deleteStudentPhoto'])
+
+    router.post('staff/:staff_id/photo', [StorageController, 'uploadStaffPhoto']).use(middleware.rateLimit({ name: 'upload', max: 30, windowSec: 60 }))
+    router.delete('staff/:staff_id/photo', [StorageController, 'deleteStaffPhoto'])
+
+    // Protected (encrypted) files: login + same-school check
+    router.get('vault/:uuid', [SanjayaController, 'show'])
   })
   .prefix('/api/v1/')
-  .use(middleware.auth())
+  .use([
+    middleware.auth(),
+    middleware.templateGate(),
+    middleware.piiAudit(),
+    middleware.rateLimit({ name: 'api', max: 600, windowSec: 60 }),
+  ])
+
+router
+  .group(() => {
+    router.get('storage/proxy-image', [StorageController, 'proxyImage'])
+    // Short-lived signed link (HMAC); usable from plain <img> tags
+    router.get('vault/signed/:uuid', [SanjayaController, 'showSigned'])
+  })
+  .prefix('/api/v1/')
+  .use(middleware.rateLimit({ name: 'signed-link', max: 300, windowSec: 60, by: 'ip' }))

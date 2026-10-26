@@ -12,6 +12,7 @@ import app from '@adonisjs/core/services/app'
 import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 import fs from 'node:fs'
+import SpacesService from '#services/SpacesService'
 
 const fonts = {
   Roboto: {
@@ -735,10 +736,29 @@ export default class LessonPlanController {
 
     const printer = new PdfPrinter(fonts, fs as any, { resolve: () => { }, resolved: () => Promise.resolve() })
     const pdfDoc = await (printer as any).createPdfKitDocument(docDefinition)
+    const chunks: Buffer[] = []
+    pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk))
+    const pdfBufferPromise = new Promise<Buffer>((resolve, reject) => {
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)))
+      pdfDoc.on('error', reject)
+    })
     pdfDoc.end()
+    const pdfBuffer = await pdfBufferPromise
+
+    const filename = `coverage-report_${Date.now()}.pdf`
+
+    // Upload to DigitalOcean Spaces
+    try {
+      const uploadResult = await SpacesService.uploadExport('lesson-plans', filename, pdfBuffer)
+      response.header('x-cloud-url', uploadResult.url)
+      response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+    } catch (e) {
+      console.error('[LessonPlanController] Failed to upload export to Spaces:', e)
+    }
+
     response.header('Content-Type', 'application/pdf')
-    response.header('Content-Disposition', 'attachment; filename="coverage-report.pdf"')
-    return response.stream(pdfDoc)
+    response.header('Content-Disposition', `attachment; filename="${filename}"`)
+    return response.send(pdfBuffer)
   }
 
   // ── 11. Export Single Lesson Plan PDF (the main one) ─────────────────────
@@ -946,7 +966,6 @@ export default class LessonPlanController {
     const competencyHeader = [...new Set(subtopics.map(st => st.competency).filter(Boolean))].join(', ') || 'N/A'
     const conclusionText = dailyLogs.map(log => log.conclusion).filter(Boolean).join('\n') || 'N/A'
     const referenceBookText = dailyLogs.map(log => log.referenceBook).filter(Boolean).join('\n') || 'N/A'
-    const attendanceText = dailyLogs.map(log => log.attendance).filter(Boolean).join(', ') || 'N/A'
 
     // Subject + batch string for the boxed detail
     const batchSuffix = batchName ? ` - Batch: ${batchName}` : ''
@@ -1188,11 +1207,29 @@ export default class LessonPlanController {
 
     const printer = new PdfPrinter(fonts, fs as any, { resolve: () => { }, resolved: () => Promise.resolve() })
     const pdfDoc = await (printer as any).createPdfKitDocument(docDefinition)
+    const chunks: Buffer[] = []
+    pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk))
+    const pdfBufferPromise = new Promise<Buffer>((resolve, reject) => {
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)))
+      pdfDoc.on('error', reject)
+    })
     pdfDoc.end()
+    const pdfBuffer = await pdfBufferPromise
+
+    const filename = `LP-${subjectName.replace(/\s+/g, '_')}-${lpNumber}.pdf`
+
+    // Upload to DigitalOcean Spaces
+    try {
+      const uploadResult = await SpacesService.uploadExport('lesson-plans', filename, pdfBuffer)
+      response.header('x-cloud-url', uploadResult.url)
+      response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+    } catch (e) {
+      console.error('[LessonPlanController] Failed to upload export to Spaces:', e)
+    }
 
     response.header('Content-Type', 'application/pdf')
-    response.header('Content-Disposition', `attachment; filename="LP-${subjectName.replace(/\s+/g, '_')}-${lpNumber}.pdf"`)
-    return response.stream(pdfDoc)
+    response.header('Content-Disposition', `attachment; filename="${filename}"`)
+    return response.send(pdfBuffer)
   }
 
 }

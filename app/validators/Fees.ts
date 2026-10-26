@@ -27,11 +27,13 @@ export const UpdateValidatorForFeesType = vine.compile(
 
 export const CreateValidatorForFeesPlan = vine.compile(
   vine.object({
-    academic_year: vine.number(),
+    academic_year: vine.number().optional(),
+    academic_session_id: vine.number().optional(),
     fees_plan: vine.object({
-      name: vine.string().trim().minLength(2).maxLength(50).optional(),
-      description: vine.string().trim().minLength(2).maxLength(50).optional(),
-      class_id: vine.number(),
+      name: vine.string().trim().minLength(2).maxLength(100).optional(),
+      description: vine.string().trim().maxLength(255).optional().nullable(),
+      class_id: vine.number().min(1),
+      quota_id: vine.number().nullable().optional(),
     }),
     plan_details: vine
       .array(
@@ -43,21 +45,17 @@ export const CreateValidatorForFeesPlan = vine.compile(
             'Monthly',
             'Quarterly',
             'Half Yearly',
+            'Half-Yearly',
             'Yearly',
           ]),
-          total_installment: vine.number(), // string().regex(/^\d+(\.\d+)?$/), // Ensures the string contains only numbers with optional decimal points
-          total_amount: vine.number().max(100000).min(100),
+          total_installment: vine.number(),
+          total_amount: vine.number().min(0),
           installment_breakDowns: vine
             .array(
               vine.object({
-                // fee_plan_details_id: vine.number(),
                 installment_no: vine.number(),
-                /**
-                 * TODOD : NEED TO ADD PEROPE VALIDATION
-                 */
                 installment_amount: vine.number(),
                 due_date: vine.date(),
-                // totoal_installment: vine.number(),
               })
             )
             .minLength(1),
@@ -71,9 +69,9 @@ export const UpdateValidatorForFeesPlan = vine.compile(
   vine.object({
     fees_plan: vine
       .object({
-        name: vine.string().trim().minLength(2).maxLength(50).optional(),
-        description: vine.string().trim().minLength(2).maxLength(50).optional(),
-        // status: vine.enum(['Active', 'Inactive']).optional(),
+        name: vine.string().trim().minLength(2).maxLength(100).optional(),
+        description: vine.string().trim().maxLength(255).optional().nullable(),
+        quota_id: vine.number().nullable().optional(),
       })
       .optional(),
     plan_details: vine
@@ -86,10 +84,11 @@ export const UpdateValidatorForFeesPlan = vine.compile(
             'Monthly',
             'Quarterly',
             'Half Yearly',
+            'Half-Yearly',
             'Yearly',
           ]),
           total_installment: vine.number(),
-          total_amount: vine.number().max(100000).min(100),
+          total_amount: vine.number().min(0),
           installment_breakDowns: vine
             .array(
               vine.object({
@@ -109,9 +108,9 @@ export const UpdateValidatorForFeesPlanDetails = vine.compile(
   vine.object({
     general_detail_for_plan: vine
       .object({
-        name: vine.string().trim().minLength(2).maxLength(50).optional(),
-        description: vine.string().trim().minLength(2).maxLength(50).optional(),
-        // status: vine.enum(['Active', 'Inactive']).optional(),
+        name: vine.string().trim().minLength(2).maxLength(100).optional(),
+        description: vine.string().trim().maxLength(255).optional().nullable(),
+        quota_id: vine.number().nullable().optional(),
       }).optional(),
     new_fees_type: vine
       .array(
@@ -123,10 +122,11 @@ export const UpdateValidatorForFeesPlanDetails = vine.compile(
             'Monthly',
             'Quarterly',
             'Half Yearly',
+            'Half-Yearly',
             'Yearly',
           ]),
           total_installment: vine.number(),
-          total_amount: vine.number().max(100000).min(100),
+          total_amount: vine.number().min(0),
           installment_breakDowns: vine
             .array(
               vine.object({

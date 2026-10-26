@@ -40,6 +40,7 @@ export default class StudentManagementController {
           'middle_name',
           'last_name',
           'gr_no',
+          'profile_photo',
           'first_year_roll_number',
           'second_year_roll_number',
           'third_year_roll_number',
@@ -104,6 +105,13 @@ export default class StudentManagementController {
           message: 'Class not found for migration',
         })
       }
+    }
+
+    if (!payload.migrated_division) {
+      return ctx.response.status(400).json({
+        success: false,
+        message: 'migrated_division is required',
+      })
     }
 
     let new_division = await Division

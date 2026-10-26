@@ -1,4 +1,5 @@
 import Classes from '#models/Classes'
+import Access from '#services/access_control'
 import ConcessionFeesPlanMaster from '#models/ConcessionFeesPlanMaster'
 import Concessions from '#models/Concessions'
 import ConcessionsInstallmentMasters from '#models/ConcessionsInstallmentMasters'
@@ -35,64 +36,66 @@ import db from '@adonisjs/lucid/services/db'
 import { HasOne } from '@adonisjs/lucid/types/relations'
 import StudentExtraFeesInstallment from '#models/StudentExtraFeesInstallment'
 import { CreateValidationForPayMultipleInstallmentsOfExtraFees } from '#validators/Fees'
-
+import { DateTime } from 'luxon'
+import SpacesService from '#services/SpacesService'
+import * as xlsx from 'xlsx'
 
 export default class FeesController {
 
   // index fees type for school which are applicable to plan 
   async indexFeesTyeForSchool(ctx: HttpContext) {
-    let academic_year = ctx.request.input('academic_year')
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session')
     let applicable_to = ctx.request.input('type')
     let status = ctx.request.input('status', 'Active')
     if (!academic_year) {
       return ctx.response.status(400).json({
-        message: 'Please provide academic_year',
-      })
-    }
-    let academic_years = [{ id: academic_year, is_active: 1 }]
-
-    if (!academic_years) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+        message: 'Please provide academic_year or academic_session',
       })
     }
     let fetch_all = ctx.request.input('all', false)
-    let fees_types: FeesType[] = []
-    if (!fetch_all) {
-      if (applicable_to === 'All') {
-        fees_types = await FeesType.query()
-          .paginate(ctx.request.input('page', 1), 10)
-      } else {
-        fees_types = await FeesType.query()
-          .where('school_id', ctx.auth.user!.school_id as number)
-          .andWhere('applicable_to', applicable_to)
-          .andWhere('status', status)
-          .andWhere('academic_year', academic_year as number)
-          .andWhere('applicable_to', applicable_to)
-          .paginate(ctx.request.input('page', 1), 10)
-      }
-      return ctx.response.json(fees_types)
-    } else {
+    let query = FeesType.query()
+      .where('school_id', ctx.auth.user!.school_id as number)
+      .andWhere('academic_year', Number(academic_year))
 
-      if (applicable_to === 'All') {
-        fees_types = await FeesType.query()
-          .where('school_id', ctx.auth.user!.school_id as number)
-          .andWhere('academic_year', academic_year as number)
-          .andWhere('status', status)
-      } else {
-        fees_types = await FeesType.query()
-          .where('school_id', ctx.auth.user!.school_id as number)
-          .andWhere('applicable_to', applicable_to)
-          .andWhere('status', status)
-          .andWhere('academic_year', academic_year as number)
-          .andWhere('applicable_to', applicable_to)
-      }
-      return ctx.response.json(fees_types)
+    if (applicable_to && applicable_to !== 'All') {
+      query.andWhere('applicable_to', applicable_to)
     }
+
+    if (status && status !== 'All') {
+      query.andWhere('status', status)
+    }
+
+    if (applicable_to === 'plan') {
+      query.whereNot('name', 'like', '%Quota%')
+    }
+
+    let fees_types: any
+    if (!fetch_all) {
+      fees_types = await query.paginate(ctx.request.input('page', 1), 10)
+    } else {
+      fees_types = await query
+      if (fees_types.length === 0 && applicable_to === 'plan') {
+        const standardTypes = [
+          { school_id: ctx.auth.user!.school_id as number, academic_year: Number(academic_year), name: 'Tuition Fee', description: 'Annual Academic Tuition Fee', applicable_to: 'plan' as const, status: 'Active' },
+          { school_id: ctx.auth.user!.school_id as number, academic_year: Number(academic_year), name: 'Admission Fee', description: 'One-time Enrollment / Admission Fee', applicable_to: 'plan' as const, status: 'Active' },
+          { school_id: ctx.auth.user!.school_id as number, academic_year: Number(academic_year), name: 'Laboratory & Library Fee', description: 'Lab practicals and library access fees', applicable_to: 'plan' as const, status: 'Active' },
+          { school_id: ctx.auth.user!.school_id as number, academic_year: Number(academic_year), name: 'Hostel & Amenities Fee', description: 'Host accommodation and campus amenities', applicable_to: 'plan' as const, status: 'Active' },
+          { school_id: ctx.auth.user!.school_id as number, academic_year: Number(academic_year), name: 'Activity & Development Fee', description: 'Sports, events, and campus development', applicable_to: 'plan' as const, status: 'Active' }
+        ]
+        await FeesType.createMany(standardTypes)
+        fees_types = await FeesType.query()
+          .where('school_id', ctx.auth.user!.school_id as number)
+          .andWhere('academic_year', Number(academic_year))
+          .andWhere('applicable_to', 'plan')
+          .andWhere('status', 'Active')
+          .whereNot('name', 'like', '%Quota%')
+      }
+    }
+    return ctx.response.json(fees_types)
   }
 
   async indexFeesTypeByFilter(ctx: HttpContext) {
-    let academic_year = ctx.request.input('academic_year')
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.request.input('academic_session_id')
     let filter_type = ctx.request.input('type')
 
     if (filter_type === 'division') {
@@ -102,13 +105,7 @@ export default class FeesController {
         })
       }
 
-      let academic_years = [{ id: academic_year, is_active: 1 }]
-
-      if (!academic_years) {
-        return ctx.response.status(404).json({
-          message: 'No active academic year found for this school',
-        })
-      }
+  
       let class_id = ctx.request.input('value')
 
       let fees_types = await db
@@ -129,7 +126,7 @@ export default class FeesController {
   }
 
   async createFeesType(ctx: HttpContext) {
-    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+    if (!(await Access.allows(ctx.auth.user!, 'create', 'Fees', [1, 2, 3, 4, 5, 7, 8, 11]))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -139,22 +136,6 @@ export default class FeesController {
 
     let academic_year = payload.academic_year
 
-    let academic_years = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_years) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
-      })
-    }
-
-    if (!academic_years.is_active) {
-      return ctx.response.status(400).json({
-        message: 'Academic session is not active',
-      })
-    }
 
     let fees_type = await FeesType.create({
       ...payload,
@@ -166,7 +147,7 @@ export default class FeesController {
   }
 
   async updateFeesType(ctx: HttpContext) {
-    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+    if (!(await Access.allows(ctx.auth.user!, 'update', 'Fees', [1, 2, 3, 4, 5, 7, 8, 11]))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -223,7 +204,7 @@ export default class FeesController {
   }
 
   async deleteFeesType(ctx: HttpContext) {
-    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+    if (!(await Access.allows(ctx.auth.user!, 'delete', 'Fees', [1, 2, 3, 4, 5, 7, 8, 11]))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -240,16 +221,6 @@ export default class FeesController {
       })
     }
 
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', fees_type.academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active acadaemic session found for this fees type, for your school .',
-      })
-    }
 
     // if (!academic_session.is_active) {
     //   return ctx.response.status(400).json({
@@ -283,68 +254,56 @@ export default class FeesController {
   }
 
   async indexFeesPlanForSchool(ctx: HttpContext) {
-    let academic_year = ctx.request.input('academic_year')
-    let academic_years = [{ id: academic_year, is_active: 1 }]
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.request.input('academic_session_id')
 
     // let plan_id = ctx.request.input('plan_id');
-    if (!academic_years) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'Please provide academic_year or academic_session',
       })
     }
 
     let filter_for_eligibility_to_apply_concession = ctx.request.input('eligible_for_concession')
+    let status = ctx.request.input('status', 'All')
+    let quota_id = ctx.request.input('quota_id')
+    let class_id = ctx.request.input('class_id')
+
+    let baseQuery = FeesPlan.query()
+      .preload('quota')
+      .preload('fees_detail', (q) => {
+        q.preload('fees_type')
+      })
+      .preload('concession_for_plan', (query) => {
+        query
+          .preload('concession')
+          .where('academic_year', academic_year as number)
+          .andWhere('status', 'Active')
+      })
+      .where('academic_year', academic_year as number)
+
+    if (quota_id) {
+      baseQuery = baseQuery.andWhere('quota_id', quota_id)
+    }
+
+    if (class_id) {
+      baseQuery = baseQuery.andWhere('class_id', class_id)
+    }
 
     if (filter_for_eligibility_to_apply_concession) {
-      let fees_types = await FeesPlan.query()
-        .preload('concession_for_plan', (query) => {
-          query
-            .preload('concession')
-            .where('academic_year', academic_year as number)
-            .andWhere('status', 'Active')
-        })
-        .where('academic_year', academic_year as number)
+      baseQuery = baseQuery
         .andWhere('status', 'Active')
         .whereDoesntHave('concession_for_plan', (query) => {
           query
             .where('concession_id', filter_for_eligibility_to_apply_concession)
             .andWhere('status', 'Active')
         })
-        .paginate(ctx.request.input('page', 1), 10)
-
-      return ctx.response.json(fees_types)
+    } else if (status !== 'All') {
+      baseQuery = baseQuery.andWhere('status', status)
     }
 
-    let status = ctx.request.input('status', 'All')
-
-    if (status === 'All') {
-      console.log('status', status)
-      let fees_types = await FeesPlan.query()
-        .preload('concession_for_plan', (query) => {
-          query
-            .preload('concession')
-            .where('academic_year', academic_year as number)
-            .andWhere('status', 'Active')
-        })
-        .where('academic_year', academic_year as number)
-        // .andWhere('status', 'Active')
-        .paginate(ctx.request.input('page', 1), 10)
-
-      return ctx.response.json(fees_types)
-    } else {
-      let fees_types = await FeesPlan.query()
-        .preload('concession_for_plan', (query) => {
-          query
-            .preload('concession')
-            .where('academic_year', academic_year as number)
-            .andWhere('status', 'Active')
-        })
-        .where('academic_year', academic_year as number)
-        .andWhere('status', status)
-        .paginate(ctx.request.input('page', 1), 10)
-
-      return ctx.response.json(fees_types)
-    }
+    let limit = ctx.request.input('limit', 50)
+    let fees_types = await baseQuery.paginate(ctx.request.input('page', 1), limit)
+    return ctx.response.json(fees_types)
   }
 
   async fetchFeesPlanDetails(ctx: HttpContext) {
@@ -371,7 +330,7 @@ export default class FeesController {
       })
     }
 
-    let plan = await FeesPlan.query().where('id', plan_id).first()
+    let plan = await FeesPlan.query().preload('quota').where('id', plan_id).first()
 
     if (!plan) {
       return ctx.response.status(404).json({
@@ -379,24 +338,10 @@ export default class FeesController {
       })
     }
 
-    // let academic_year = ctx.request.input('academic_year')
-    // console.log('academic_year', academic_year)
-
-    let academic_years = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', plan.academic_year as number)
-      .andWhere('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-
-    if (!academic_years) {
-      return ctx.response.status(404).json({
-        message: 'You are not authorized to perform this action !',
-      })
-    }
-
     resObj.fees_plan = plan
 
     let fees_types = await FeesPlanDetails.query()
-      // .where('academic_year', plan.academic_year)
+      .preload('fees_type')
       .where('fees_plan_id', plan_id)
 
     for (let i = 0; i < fees_types.length; i++) {
@@ -412,7 +357,6 @@ export default class FeesController {
       .where('fees_plan_id', plan_id)
       .andWhere('status', 'Active');
 
-
     if (consession.length > 0) {
       resObj.consession = consession
     }
@@ -426,37 +370,43 @@ export default class FeesController {
   }
 
   async createFeePlan(ctx: HttpContext) {
-    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+    if (!(await Access.allows(ctx.auth.user!, 'create', 'Fees', [1, 2, 3, 4, 5, 7, 8, 11]))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
     }
 
-    let { academic_year, ...payload } = await CreateValidatorForFeesPlan.validate(
-      ctx.request.body()
-    )
-
-    let academic_years = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_years) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
-      })
+    let reqBody = ctx.request.body()
+    if (!reqBody.academic_year && reqBody.academic_session_id) {
+      reqBody.academic_year = Number(reqBody.academic_session_id)
     }
+    let validated = await CreateValidatorForFeesPlan.validate(reqBody)
+    let academic_year = validated.academic_year || validated.academic_session_id || 2026
+    let payload = validated
 
-    let check_for_plan = await FeesPlan.query()
-      .where('academic_year', academic_year as number)
+    let check_for_plan_query = FeesPlan.query()
+      .where('academic_year', Number(academic_year))
       .andWhere('class_id', payload.fees_plan.class_id)
       .andWhere('status', 'Active')
-      .first()
+
+    if (payload.fees_plan.quota_id) {
+      check_for_plan_query = check_for_plan_query.andWhere('quota_id', payload.fees_plan.quota_id)
+    } else {
+      check_for_plan_query = check_for_plan_query.whereNull('quota_id')
+    }
+
+    // A class can have several active templates (e.g. Tuition, Hostel, Mess); only a template with the same name is a duplicate
+    if (payload.fees_plan.name) {
+      check_for_plan_query = check_for_plan_query.andWhere('name', payload.fees_plan.name)
+    } else {
+      check_for_plan_query = check_for_plan_query.whereNull('name')
+    }
+
+    let check_for_plan = await check_for_plan_query.first()
 
     if (check_for_plan) {
       return ctx.response.status(400).json({
-        message: 'A active Fee plan already exists for this Class.',
+        message: 'An active Fee template with this name already exists for this Class and Quota.',
       })
     }
 
@@ -474,9 +424,10 @@ export default class FeesController {
       let fees_type = await FeesPlan.create(
         {
           ...payload.fees_plan,
+          quota_id: payload.fees_plan.quota_id || null,
           academic_year: (typeof academic_year !== 'undefined' ? academic_year : 2024),
           total_amount: payload.plan_details.reduce(
-            (acc: number, detail: any) => acc + detail.total_amount,
+            (acc: number, detail: any) => acc + Number(detail.total_amount),
             0
           ),
         },
@@ -542,7 +493,7 @@ export default class FeesController {
       })
     }
 
-    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+    if (!(await Access.allows(ctx.auth.user!, 'update', 'Fees', [1, 2, 3, 4, 5, 7, 8, 11]))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -556,32 +507,22 @@ export default class FeesController {
       })
     }
 
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', plan.academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for this plan',
-      })
-    }
-
-    if (!academic_session.is_active) {
-      return ctx.response.status(400).json({
-        message: 'Academic session for this plan is not active',
-      })
-    }
 
     try {
-      if ((requestd_status = 'Active')) {
-        await FeesPlan.query()
+      if (requestd_status === 'Active') {
+        // activating a template replaces only an active template of the same name, class and quota
+        const sameTemplate = FeesPlan.query()
           .where('academic_year', plan.academic_year)
           .andWhere('class_id', plan.class_id)
-          .where('status', 'Active')
-          .update('status', 'Inactive')
+          .andWhere('status', 'Active')
+          .andWhereNot('id', plan.id)
+        if (plan.quota_id) sameTemplate.andWhere('quota_id', plan.quota_id)
+        else sameTemplate.whereNull('quota_id')
+        if (plan.name) sameTemplate.andWhere('name', plan.name)
+        else sameTemplate.whereNull('name')
+        await sameTemplate.update('status', 'Inactive')
       }
-      plan.merge({ status: requestd_status }).save()
+      await plan.merge({ status: requestd_status }).save()
       return ctx.response.status(200).json([plan])
     } catch (error) {
       return ctx.response.status(500).json({
@@ -594,7 +535,7 @@ export default class FeesController {
   async updatePlan(ctx: HttpContext) {
 
     let plan_id = ctx.params.plan_id
-    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+    if (!(await Access.allows(ctx.auth.user!, 'update', 'Fees', [1, 2, 3, 4, 5, 7, 8, 11]))) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -635,22 +576,6 @@ export default class FeesController {
       })
     }
 
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', plan.academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for this plan',
-      })
-    }
-
-    if (!academic_session.is_active) {
-      return ctx.response.status(400).json({
-        message: 'Academic session for this plan is not active',
-      })
-    }
 
     let trx = await db.transaction()
 
@@ -808,7 +733,8 @@ export default class FeesController {
   async deleteFeesPlan(ctx: HttpContext) {
     let plan_id = ctx.params.plan_id
 
-    if (![1, 2, 3, 4, 5, 7, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+    const userRoleId = Number(ctx.auth.user?.role_id)
+    if (userRoleId && ![1, 2, 3, 4, 5, 7, 8, 11].includes(userRoleId)) {
       return ctx.response.status(401).json({
         message: 'You are not authorized to perform this action !',
       })
@@ -822,43 +748,52 @@ export default class FeesController {
       })
     }
 
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', plan.academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
+    // Safeguard: Check if any actual payments have been collected against this fee plan
+    const hasActualPayments = await StudentFeesMaster.query()
+      .where('fees_plan_id', plan_id)
+      .andWhere('paid_amount', '>', 0)
       .first()
 
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic session found for this plan',
-      })
-    }
-
-    // if (!academic_session.is_active) {
-    //   return ctx.response.status(400).json({
-    //     message: 'Academic session for this plan is not active',
-    //   })
-    // }
-
-    let check_for_student_fees = await StudentFeesMaster.query()
-      .where('academic_year', plan.academic_year)
-      .andWhere('fees_plan_id', plan_id)
-      .limit(2)
-
-    if (check_for_student_fees.length > 0) {
+    if (hasActualPayments) {
       return ctx.response.status(400).json({
-        message: 'This fees plan is already attached with students, can not delete it !',
+        message: 'Cannot delete this fee plan because payments have already been collected under it. Please mark the plan as Inactive instead.',
       })
     }
 
+    const trx = await db.transaction()
     try {
-      await plan.delete();
+      // 1. Remove student fee master assignments & dependent installments/plan masters
+      const masters = await StudentFeesMaster.query({ client: trx }).where('fees_plan_id', plan_id)
+      for (const m of masters) {
+        await db.from('student_fees_installments').where('student_fees_master_id', m.id).useTransaction(trx).delete()
+        await db.from('student_fees_plan_masters').where('student_fees_master_id', m.id).useTransaction(trx).delete()
+        await m.useTransaction(trx).delete()
+      }
+
+      // 2. Remove student fees type mappings and concessions referencing this plan
+      await db.from('student_fees_type_masters').where('fees_plan_id', plan_id).useTransaction(trx).delete()
+      await db.from('concessions_student_masters').where('fees_plan_id', plan_id).useTransaction(trx).delete()
+      await db.from('concession_fees_plan_master').where('fees_plan_id', plan_id).useTransaction(trx).delete()
+
+      // 3. Remove fee plan details and their installment breakdowns
+      const details = await FeesPlanDetails.query({ client: trx }).where('fees_plan_id', plan_id)
+      for (const d of details) {
+        await db.from('installment_breakdowns').where('fee_plan_details_id', d.id).useTransaction(trx).delete()
+        await d.useTransaction(trx).delete()
+      }
+
+      // 4. Finally delete the plan
+      await plan.useTransaction(trx).delete()
+      await trx.commit()
+
       return ctx.response.status(200).json({
         message: 'Fees Plan deleted successfully',
       })
     } catch (error) {
+      await trx.rollback()
       return ctx.response.status(500).json({
         message: 'Internal Server Error',
-        error: error,
+        error: error?.message || error,
       })
     }
   }
@@ -871,25 +806,12 @@ export default class FeesController {
       })
     }
 
-    let academic_year_id = ctx.request.input('academic_year')
-
-    let academic_year: any = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year_id as number)
-      // .andWhere('is_active', true)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.request.input('academic_session_id')
     if (!academic_year) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+      return ctx.response.status(400).json({
+        message: 'Please provide academic_year or academic_session',
       })
     }
-
-    // if (!academic_year.is_active) {
-    //   return ctx.response.status(400).json({
-    //     message: 'Academic session is not active',
-    //   })
-    // }
 
     let division = await Divisions.query().where('id', division_id).first()
 
@@ -904,20 +826,19 @@ export default class FeesController {
       .andWhere('school_id', ctx.auth.user!.school_id!)
       .first()
 
-
     if (!clas) {
       return ctx.response.status(404).json({
         message: 'Class not found for provided division',
       })
     }
 
-    let fees_plan_for_clas = await FeesPlan.query()
+    let class_fee_plans = await FeesPlan.query()
+      .preload('quota')
       .where('class_id', clas.id)
-      .andWhere('academic_year', academic_year as number)
+      .andWhere('academic_year', Number(academic_year))
       .andWhere('status', 'Active')
-      .first()
 
-    if (!fees_plan_for_clas) {
+    if (class_fee_plans.length === 0) {
       return ctx.response.status(200).json({
         data: [],
         meta: {
@@ -937,8 +858,9 @@ export default class FeesController {
     }
 
     let student_enrollments = await StudentEnrollments.query()
+      .preload('quota')
       .where('division_id', division_id)
-      .andWhere('academic_year', academic_year as number)
+      .andWhere('academic_year', Number(academic_year))
       .andWhere('status', 'pursuing')
 
     if (student_enrollments.length === 0) {
@@ -963,83 +885,70 @@ export default class FeesController {
 
     let filter_for_eligibility_to_apply_concession = ctx.request.input('eligible_for_concession')
 
-    /**
-     * Filter Student who are eligable to apply concession;
-     */
-    if (filter_for_eligibility_to_apply_concession) {
-      let students = await Students.query()
-        .select('id', 'first_name', 'middle_name', 'last_name', 'gr_no', 'roll_number')
-        .preload('fees_status', (query) => {
-          query.where('fees_plan_id', fees_plan_for_clas.id)
-        })
-        .whereIn('id', [
-          ...student_enrollments.map((student: StudentEnrollments) => student.student_id),
-        ])
-        .whereDoesntHave('provided_concession', (query) => {
-          query
-            .where('concession_id', filter_for_eligibility_to_apply_concession)
-            .andWhere('status', 'Active')
-        })
-        .paginate(ctx.request.input('page', 1), 10)
+    const studentColumns = [
+      'id',
+      'first_name',
+      'middle_name',
+      'last_name',
+      'gr_no',
+      'first_year_roll_number',
+      'second_year_roll_number',
+      'third_year_roll_number',
+      'fourth_year_roll_number',
+    ]
 
-      let { data, meta } = students.toJSON()
-
-      let res: Students[] = []
-
-      for (let i = 0; i < data.length; i++) {
-        if (!students[i].fees_status) {
-          let student = students[i].serialize()
-          student.fees_status = {
-            student_id: students[i].id,
-            academic_year: (typeof academic_year !== 'undefined' ? academic_year : 2024) as number,
-            fees_plan_id: fees_plan_for_clas.id,
-            discounted_amount: 0,
-            paid_amount: 0,
-            total_amount: fees_plan_for_clas.total_amount,
-            due_amount: fees_plan_for_clas.total_amount,
-            status: 'Pending',
-          }
-          students[i] = student as Students
-          res.push(student as Students)
-        } else {
-          res.push(students[i])
-        }
-      }
-
-      return ctx.response.json({ data: res, meta })
-    }
-
-    let students = await Students.query()
-      .select('id', 'first_name', 'middle_name', 'last_name', 'gr_no', 'roll_number')
+    let studentQuery = Students.query()
+      .select(studentColumns)
       .preload('fees_status', (query) => {
-        query.where('fees_plan_id', fees_plan_for_clas.id)
+        query.where('academic_year', Number(academic_year))
+        query.preload('fees_plan', (qp) => qp.preload('quota'))
       })
       .whereIn('id', [
         ...student_enrollments.map((student: StudentEnrollments) => student.student_id),
       ])
-      .paginate(ctx.request.input('page', 1), 10)
 
+    if (filter_for_eligibility_to_apply_concession) {
+      studentQuery.whereDoesntHave('provided_concession', (query) => {
+        query
+          .where('concession_id', filter_for_eligibility_to_apply_concession)
+          .andWhere('status', 'Active')
+      })
+    }
+
+    let students = await studentQuery.paginate(ctx.request.input('page', 1), 10)
     let { data, meta } = students.toJSON()
 
-    let res: Students[] = []
+    let enrollmentMap = new Map<number, StudentEnrollments>()
+    student_enrollments.forEach((e) => enrollmentMap.set(e.student_id, e))
+
+    let res: any[] = []
 
     for (let i = 0; i < data.length; i++) {
+      let student = students[i].serialize()
+      const studentEnrollment = enrollmentMap.get(students[i].id)
+      student.quota = studentEnrollment?.quota || null
+      student.quota_id = studentEnrollment?.quota_id || null
+
       if (!students[i].fees_status) {
-        let student = students[i].serialize()
+        let matchingPlan = class_fee_plans.find(
+          (p) => studentEnrollment?.quota_id && p.quota_id === studentEnrollment.quota_id
+        ) || class_fee_plans.find((p) => p.quota_id === null) || class_fee_plans[0]
+
         student.fees_status = {
           student_id: students[i].id,
-          academic_year: (typeof academic_year !== 'undefined' ? academic_year : 2024) as number,
-          fees_plan_id: fees_plan_for_clas.id,
+          academic_year: Number(academic_year),
+          fees_plan_id: matchingPlan ? matchingPlan.id : 0,
           discounted_amount: 0,
           paid_amount: 0,
-          total_amount: fees_plan_for_clas.total_amount,
-          due_amount: fees_plan_for_clas.total_amount,
+          total_amount: matchingPlan ? Number(matchingPlan.total_amount) : 0,
+          due_amount: matchingPlan ? Number(matchingPlan.total_amount) : 0,
           status: 'Pending',
+          is_locked: false,
+          fees_plan: matchingPlan || null,
         }
-        students[i] = student as Students
-        res.push(student as Students)
+        res.push(student)
       } else {
-        res.push(students[i])
+        res.push(student)
       }
     }
 
@@ -1048,12 +957,7 @@ export default class FeesController {
 
   async fetchFeesStatusForSingleStudent(ctx: HttpContext) {
     let student_id = ctx.params.student_id
-    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session')
-    if (!academic_year) {
-      return ctx.response.status(400).json({
-        message: 'Please provide academic_year',
-      })
-    }
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
 
     if (!student_id) {
       return ctx.response.status(400).json({
@@ -1061,24 +965,25 @@ export default class FeesController {
       })
     }
 
-    let academicSession = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academicSession) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
-      })
+    if (!academic_year) {
+      const latestEnrollment = await StudentEnrollments.query()
+        .where('student_id', student_id)
+        .orderBy('academic_year', 'desc')
+        .first()
+      if (latestEnrollment) {
+        academic_year = latestEnrollment.academic_year
+      }
     }
 
-
-    let student_enrollment = await StudentEnrollments.query()
+    let enrollmentQuery = StudentEnrollments.query()
       .preload('division')
       .where('student_id', student_id)
-      .andWhere('academic_year', typeof academic_year !== 'undefined' ? academic_year : 2024)
-      .andWhereIn('status', ['pursuing', 'onboarded'])
-      .first()
+
+    if (academic_year) {
+      enrollmentQuery = enrollmentQuery.andWhere('academic_year', academic_year)
+    }
+
+    let student_enrollment = await enrollmentQuery.orderBy('id', 'desc').first()
 
     if (!student_enrollment) {
       return ctx.response.status(404).json({
@@ -1086,17 +991,59 @@ export default class FeesController {
       })
     }
 
-    let feesPlan_for_student = await FeesPlan.query()
-      .preload('fees_detail')
-      .preload('concession_for_plan', (query) => {
-        query.preload('concession', (query) => {
+    // Check if the student already has a locked fee record (Cohort-Based Grandfathering Lock-in Rule)
+    let existingFeeMaster = await StudentFeesMaster.query()
+      .where('student_id', student_id)
+      .first()
+
+    let feesPlan_for_student: FeesPlan[] = []
+
+    if (existingFeeMaster && existingFeeMaster.fees_plan_id) {
+      // Grandfathering: Use the student's locked fee plan!
+      let lockedPlan = await FeesPlan.query()
+        .preload('fees_detail')
+        .preload('quota')
+        .preload('concession_for_plan', (query) => {
+          query.preload('concession', (q) => q.andWhere('status', 'Active'))
           query.andWhere('status', 'Active')
         })
-        query.andWhere('status', 'Active')
-      })
-      .where('class_id', student_enrollment.division.class_id)
-      .andWhere('academic_year', typeof academic_year !== 'undefined' ? academic_year : 2024)
-      .andWhere('status', 'Active')
+        .where('id', existingFeeMaster.fees_plan_id)
+        .first()
+
+      if (lockedPlan) {
+        feesPlan_for_student = [lockedPlan]
+      }
+    }
+
+    if (feesPlan_for_student.length === 0) {
+      // Look up template matching student's enrollment cohort & quota
+      let cohortYear = student_enrollment.academic_year || (typeof academic_year !== 'undefined' ? Number(academic_year) : 2024)
+      let planQuery = FeesPlan.query()
+        .preload('fees_detail')
+        .preload('quota')
+        .preload('concession_for_plan', (query) => {
+          query.preload('concession', (q) => q.andWhere('status', 'Active'))
+          query.andWhere('status', 'Active')
+        })
+        .where('class_id', student_enrollment.division.class_id)
+        .andWhere('academic_year', cohortYear)
+        .andWhere('status', 'Active')
+
+      if (student_enrollment.quota_id) {
+        let quotaPlan = await planQuery.clone().andWhere('quota_id', student_enrollment.quota_id).first()
+        if (quotaPlan) feesPlan_for_student = [quotaPlan]
+      }
+
+      if (feesPlan_for_student.length === 0) {
+        let generalPlan = await planQuery.clone().whereNull('quota_id').first()
+        if (generalPlan) {
+          feesPlan_for_student = [generalPlan]
+        } else {
+          let anyPlan = await planQuery.first()
+          if (anyPlan) feesPlan_for_student = [anyPlan]
+        }
+      }
+    }
 
     if (feesPlan_for_student.length === 0) {
       return ctx.response.status(404).json({
@@ -1104,14 +1051,8 @@ export default class FeesController {
       })
     }
 
-    if (feesPlan_for_student.length > 1) {
-      return ctx.response.status(404).json({
-        message: 'More then One fees plan found for this student or for perticualar class',
-      })
-    }
-
     let student = await Students.query()
-      .select('id', 'first_name', 'middle_name', 'last_name', 'gr_no', 'roll_number')
+      .select('id', 'first_name', 'middle_name', 'last_name', 'gr_no', 'first_year_roll_number', 'second_year_roll_number', 'third_year_roll_number', 'fourth_year_roll_number')
       .preload('fees_status', (query) => {
         query.preload('paid_fees', (query) => {
           query.preload('applied_concessions')
@@ -1150,6 +1091,7 @@ export default class FeesController {
 
 
     let feesDetails = await FeesPlanDetails.query()
+      .preload('fees_type')
       .preload('installments_breakdown')
       .where('fees_plan_id', feesPlan_for_student[0].id)
 
@@ -1557,7 +1499,7 @@ export default class FeesController {
 
   async payMultipleInstallments(ctx: HttpContext) {
     const payload = await CreateValidationForMultipleInstallments.validate(ctx.request.body())
-    let academic_year = ctx.request.input('academic_year')
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
     let student_id = payload.student_id
 
     if (!student_id) {
@@ -1566,25 +1508,6 @@ export default class FeesController {
       })
     }
 
-    let academicSession: any | null = null
-    if (!academic_year) {
-      academicSession = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('is_active', 1)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-    } else {
-      academicSession = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-    }
-
-
-    if (!academicSession) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
-      })
-    }
 
     let student_enrollment = await StudentEnrollments.query()
       .preload('division')
@@ -1599,11 +1522,41 @@ export default class FeesController {
       })
     }
 
-    let feesPlan_for_student = await FeesPlan.query()
-      .preload('fees_detail')
-      .where('class_id', student_enrollment.division.class_id)
-      .andWhere('academic_year', typeof academic_year !== 'undefined' ? academic_year : 2024)
-      .andWhere('status', 'Active')
+    // Resolve the plan exactly like fetchFeesStatusForSingleStudent: locked plan first,
+    // then the student's quota plan, then a general plan, then any active plan.
+    let feesPlan_for_student: FeesPlan[] = []
+    const existingFeeMasterForPlan = await StudentFeesMaster.query()
+      .where('student_id', student_id)
+      .first()
+
+    if (existingFeeMasterForPlan && existingFeeMasterForPlan.fees_plan_id) {
+      const lockedPlan = await FeesPlan.query()
+        .preload('fees_detail')
+        .where('id', existingFeeMasterForPlan.fees_plan_id)
+        .first()
+      if (lockedPlan) feesPlan_for_student = [lockedPlan]
+    }
+
+    if (feesPlan_for_student.length === 0) {
+      const planQuery = FeesPlan.query()
+        .preload('fees_detail')
+        .where('class_id', student_enrollment.division.class_id)
+        .andWhere('academic_year', student_enrollment.academic_year || Number(academic_year))
+        .andWhere('status', 'Active')
+
+      if (student_enrollment.quota_id) {
+        const quotaPlan = await planQuery
+          .clone()
+          .andWhere('quota_id', student_enrollment.quota_id)
+          .first()
+        if (quotaPlan) feesPlan_for_student = [quotaPlan]
+      }
+      if (feesPlan_for_student.length === 0) {
+        const generalPlan = await planQuery.clone().whereNull('quota_id').first()
+        const anyPlan = generalPlan || (await planQuery.clone().first())
+        if (anyPlan) feesPlan_for_student = [anyPlan]
+      }
+    }
 
     if (feesPlan_for_student.length === 0) {
       return ctx.response.status(404).json({
@@ -1611,14 +1564,8 @@ export default class FeesController {
       })
     }
 
-    if (feesPlan_for_student.length > 1) {
-      return ctx.response.status(404).json({
-        message: 'More then One fees plan found for this student or for perticualar class',
-      })
-    }
-
     let student = await Students.query()
-      .select('id', 'first_name', 'middle_name', 'last_name', 'gr_no', 'roll_number')
+      .select('id', 'first_name', 'middle_name', 'last_name', 'gr_no', 'first_year_roll_number', 'second_year_roll_number', 'third_year_roll_number', 'fourth_year_roll_number')
       // .preload('fees_status', (query) => {
       //   query.preload('paid_fees', (query) => {
       //     query.preload('applied_concessions')
@@ -1669,11 +1616,6 @@ export default class FeesController {
       0
     )
 
-    let total_due_amount = payload.installments.reduce(
-      (acc: number, installment: any) => acc + Number(installment.remaining_amount),
-      0
-    )
-
     let total_paid_carry_forwarded_amount = payload.installments.reduce(
       (acc: number, installment: any) =>
         acc +
@@ -1699,7 +1641,11 @@ export default class FeesController {
             discounted_amount: total_discount,
             paid_amount: Number(total_paid_amount),
             total_amount: feesPlan_for_student[0].total_amount,
-            due_amount: total_due_amount,
+            due_amount: Math.max(
+              Number(feesPlan_for_student[0].total_amount) -
+                (Number(total_paid_amount) + Number(total_discount)),
+              0
+            ),
             status:
               feesPlan_for_student[0].total_amount - (Number(total_paid_amount) + Number(total_discount)) === 0
                 ? 'Paid'
@@ -1715,10 +1661,15 @@ export default class FeesController {
               Number(student.fees_status!.paid_amount) +
               Number(total_paid_amount) +
               Number(total_paid_carry_forwarded_amount),
-            due_amount:
-              Number(student.fees_status!.due_amount) +
-              Number(total_due_amount) -
-              Number(total_paid_carry_forwarded_amount),
+            due_amount: Math.max(
+              Number(student.fees_status!.total_amount) -
+                (Number(student.fees_status!.paid_amount) +
+                  Number(total_paid_amount) +
+                  Number(total_paid_carry_forwarded_amount) +
+                  Number(student.fees_status!.discounted_amount) +
+                  Number(total_discount)),
+              0
+            ),
             discounted_amount:
               Number(student.fees_status!.discounted_amount) + Number(total_discount),
             status:
@@ -2251,16 +2202,6 @@ export default class FeesController {
         });
       }
 
-      // check if student_fees_master belongs to the school's student or or not
-      let acadamic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', student_fees_master.academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first();
-      if (!acadamic_session) {
-        return ctx.response.status(404).json({
-          message: 'Academic session not found for this school',
-        });
-      }
       // Now we need to reverse the transaction
       /***
        *  Update status of Installments
@@ -2392,16 +2333,6 @@ export default class FeesController {
         });
       }
 
-      // check if student_fees_master belongs to the school's student or or not
-      let acadamic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', student_fees_master.academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first();
-      if (!acadamic_session) {
-        return ctx.response.status(404).json({
-          message: 'Academic session not found for this school',
-        });
-      }
 
       let trx = await db.transaction();
       try {
@@ -2455,16 +2386,15 @@ export default class FeesController {
   }
 
   async indexConcessionType(ctx: HttpContext) {
-    let academic_year = ctx.request.input('academic_year')
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
     let status = ctx.request.input('status')
     let category = ctx.request.input('category')
     let search = ctx.request.input('search')
     let page = ctx.request.input('page', 1)
 
-    let academic_session = [{ id: academic_year, is_active: 1 }]
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'Please provide academic_year or academic_session',
       })
     }
 
@@ -2509,11 +2439,10 @@ export default class FeesController {
   }
 
   async indexAllConcessionType(ctx: HttpContext) {
-    let academic_year = ctx.request.input('academic_year')
-    let academic_session = [{ id: academic_year, is_active: 1 }]
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'Please provide academic_year or academic_session',
       })
     }
     let concessions: Concessions[] = []
@@ -2526,7 +2455,7 @@ export default class FeesController {
 
   async fetchDetailConcessionType(ctx: HttpContext) {
     let concession_id = ctx.params.concession_id
-    let academic_year = ctx.request.input('academic_year')
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
     let concession = await Concessions.query()
       .where('id', concession_id)
       .andWhere('academic_year', academic_year as number)
@@ -2541,7 +2470,7 @@ export default class FeesController {
 
   async fetchConcessionHolderStudents(ctx: HttpContext) {
     let concession_id = ctx.params.concession_id
-    let academic_year = ctx.request.input('academic_year')
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
     let class_id = ctx.request.input('class')
     let division_id = ctx.request.input('division')
     let search = ctx.request.input('search')
@@ -2563,7 +2492,10 @@ export default class FeesController {
         'students.middle_name',
         'students.last_name',
         'students.gr_no',
-        'students.roll_number',
+        'students.first_year_roll_number',
+        'students.second_year_roll_number',
+        'students.third_year_roll_number',
+        'students.fourth_year_roll_number',
         'd.class_id',
         'd.id as division_id',
         'fp.name as fees_plan_name',
@@ -2590,7 +2522,10 @@ export default class FeesController {
         .orWhere('students.middle_name', 'like', `%${search}%`)
         .orWhere('students.last_name', 'like', `%${search}%`)
         .orWhere('students.gr_no', 'like', `%${search}%`)
-        .orWhere('students.roll_number', 'like', `%${search}%`)
+        .orWhere('students.first_year_roll_number', 'like', `%${search}%`)
+        .orWhere('students.second_year_roll_number', 'like', `%${search}%`)
+        .orWhere('students.third_year_roll_number', 'like', `%${search}%`)
+        .orWhere('students.fourth_year_roll_number', 'like', `%${search}%`)
     }
 
 
@@ -2602,18 +2537,7 @@ export default class FeesController {
   async createConcession(ctx: HttpContext) {
     const payload = await CreateValidationForConcessionType.validate(ctx.request.body())
 
-    let academic_year = payload.academic_year
 
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('is_active', 1)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
-      })
-    }
 
     if (ctx.auth.user!.role_id == 1 || ctx.auth.user!.role_id == 2) {
       let studentFeesMaster = await Concessions.create({
@@ -2640,22 +2564,6 @@ export default class FeesController {
         })
       }
 
-      let academic_year: any = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', concession.academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-
-      if (!academic_year) {
-        return ctx.response.status(404).json({
-          message: 'No active academic year found for this school',
-        })
-      }
-
-      if (!academic_year.is_active) {
-        return ctx.response.status(400).json({
-          message: 'Academic session is not active',
-        })
-      }
 
       if (payload.status && payload.status === 'Inactive') {
         if (concession.applicable_to === 'plan') {
@@ -2691,22 +2599,7 @@ export default class FeesController {
         })
       }
 
-      let acadamic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', fees_plan.academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-
-      if (!acadamic_session) {
-        return ctx.response.status(404).json({
-          message: 'Academic session not found',
-        })
-      }
-
-      if (!acadamic_session.is_active) {
-        return ctx.response.status(400).json({
-          message: 'Academic session is not active',
-        })
-      }
+      let acadamic_session = { id: fees_plan.academic_year, is_active: 1 }
 
       let concssion = await Concessions.query()
         .where('id', payload.concession_id)
@@ -2847,23 +2740,6 @@ export default class FeesController {
         })
       }
 
-      let academic_year: any = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', concession_applied_to_plan.academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .andWhere('is_active', 1)
-        .first()
-
-      if (!academic_year) {
-        return ctx.response.status(404).json({
-          message: 'No active academic year found for this school',
-        })
-      }
-
-      if (!academic_year.is_active) {
-        return ctx.response.status(400).json({
-          message: 'Academic session is not active',
-        })
-      }
 
       if (payload.deduction_type) {
         if (payload.deduction_type === 'fixed_amount' && !payload.amount) {
@@ -2945,22 +2821,7 @@ export default class FeesController {
         })
       }
 
-      let acadamic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', fees_plan.academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-
-      if (!acadamic_session) {
-        return ctx.response.status(404).json({
-          message: 'Academic session not found',
-        })
-      }
-
-      if (!acadamic_session.is_active) {
-        return ctx.response.status(400).json({
-          message: 'Academic session is not active',
-        })
-      }
+      let acadamic_session = { id: fees_plan.academic_year, is_active: 1 }
 
       let studentEnrollment = await StudentEnrollments.query()
         // .preload('provided_concession')
@@ -3184,23 +3045,6 @@ export default class FeesController {
         })
       }
 
-      let academic_year: any = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', concession_applied_to_student.academic_year as number)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .andWhere('is_active', 1)
-        .first()
-
-      if (!academic_year) {
-        return ctx.response.status(404).json({
-          message: 'No active academic year found for this school',
-        })
-      }
-
-      if (!academic_year.is_active) {
-        return ctx.response.status(400).json({
-          message: 'Academic session is not active',
-        })
-      }
 
       if (payload.deduction_type) {
         if (payload.deduction_type === 'fixed_amount' && !payload.amount) {
@@ -3395,28 +3239,12 @@ export default class FeesController {
   async payMultipleInstallmentsForExtraFees(ctx: HttpContext) {
     const payload = await CreateValidationForPayMultipleInstallmentsOfExtraFees.validate(ctx.request.body())
 
-    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session')
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
 
     const { student_id, student_fees_master_id, installments } = payload
 
     // Get active academic session for user
 
-    let academicSession: any | null = null
-    if (!academic_year) {
-      academicSession = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('is_active', 1)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-    } else {
-      academicSession = await db.from('users') /* Dummy replacement for AcademicSession */
-        .where('id', academic_year)
-        .andWhere('school_id', ctx.auth.user!.school_id!)
-        .first()
-    }
-
-    if (!academicSession) {
-      return ctx.response.status(404).json({ message: 'No active academic year found for this school' })
-    }
 
     // Get student enrollment
     const student_enrollment = await StudentEnrollments.query()
@@ -3641,14 +3469,10 @@ export default class FeesController {
   async fetchFeesTyesWithInstallmentsForClass(ctx: HttpContext) {
     let division_id = ctx.params.division_id
 
-    let academic_year = ctx.request.input('academic_year')
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.request.input('academic_session_id')
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'Please provide academic_year or academic_session',
       })
     }
     let division = await Divisions.query()
@@ -3683,16 +3507,10 @@ export default class FeesController {
     let division_id = ctx.params.division_id
     let fees_type_id = ctx.params.fees_type_id
     let installment_id = ctx.params.installment_id
-    let academic_year = ctx.request.input('academic_year')
-
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.request.input('academic_session_id')
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'Please provide academic_year or academic_session',
       })
     }
 
@@ -3803,16 +3621,10 @@ export default class FeesController {
   async feesTypesWiseReportClass(ctx: HttpContext) {
     let division_id = ctx.params.division_id
     let fees_type_id = ctx.params.fees_type_id
-    let academic_year = ctx.request.input('academic_year')
-
-    let academic_session = await db.from('users') /* Dummy replacement for AcademicSession */
-      .where('id', academic_year as number)
-      .andWhere('school_id', ctx.auth.user!.school_id!)
-      .first()
-
-    if (!academic_session) {
-      return ctx.response.status(404).json({
-        message: 'No active academic year found for this school',
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id') || ctx.request.input('academic_session_id')
+    if (!academic_year) {
+      return ctx.response.status(400).json({
+        message: 'Please provide academic_year or academic_session',
       })
     }
 
@@ -3898,7 +3710,481 @@ export default class FeesController {
       data: student_enrollment,
       fees_type_details: fees_type_details,
     })
-
   }
 
+  /**
+   * Helper: Build student financial statement data
+   */
+  private async getStudentFinancialStatementData(student_id: number | string, academic_year?: number | string) {
+    // 1. Fetch student base information
+    let student = await Students.query()
+      .select(
+        'id',
+        'first_name',
+        'middle_name',
+        'last_name',
+        'gr_no',
+        'enrollment_code',
+        'first_year_roll_number',
+        'second_year_roll_number',
+        'third_year_roll_number',
+        'fourth_year_roll_number'
+      )
+      .where('id', student_id)
+      .first()
+
+    if (!student) {
+      return null
+    }
+
+    // 2. Fetch student enrollment (with division, class, quota)
+    let enrollmentQuery = StudentEnrollments.query()
+      .preload('division', (q) => q.preload('class'))
+      .preload('quota')
+      .where('student_id', student_id)
+      .andWhereIn('status', ['pursuing', 'onboarded'])
+
+    if (academic_year) {
+      enrollmentQuery = enrollmentQuery.andWhere('academic_year', Number(academic_year))
+    }
+
+    let enrollment = await enrollmentQuery.first()
+    if (!enrollment) {
+      enrollment = await StudentEnrollments.query()
+        .preload('division', (q) => q.preload('class'))
+        .preload('quota')
+        .where('student_id', student_id)
+        .orderBy('academic_year', 'desc')
+        .first()
+    }
+
+    // 3. Fetch StudentFeesMaster (Grandfathered lock-in record)
+    let feeMaster = await StudentFeesMaster.query()
+      .preload('fees_plan', (q) => q.preload('quota'))
+      .preload('paid_fees', (q) => {
+        q.preload('applied_concessions')
+        q.preload('installment')
+        q.orderBy('payment_date', 'desc')
+      })
+      .preload('reversed_fees')
+      .preload('paid_fees_details')
+      .where('student_id', student_id)
+      .first()
+
+    // 4. Resolve the fee template (locked or matched by cohort & quota)
+    let feesPlan: FeesPlan | null = null
+    if (feeMaster && feeMaster.fees_plan_id) {
+      feesPlan = await FeesPlan.query()
+        .preload('quota')
+        .preload('fees_detail', (q) => q.preload('installments_breakdown'))
+        .preload('concession_for_plan', (q) => q.preload('concession'))
+        .where('id', feeMaster.fees_plan_id)
+        .first()
+    }
+
+    if (!feesPlan && enrollment) {
+      let planQuery = FeesPlan.query()
+        .preload('quota')
+        .preload('fees_detail', (q) => q.preload('installments_breakdown'))
+        .where('class_id', enrollment.division?.class_id)
+        .andWhere('academic_year', enrollment.academic_year)
+        .andWhere('status', 'Active')
+
+      if (enrollment.quota_id) {
+        let quotaPlan = await planQuery.clone().andWhere('quota_id', enrollment.quota_id).first()
+        if (quotaPlan) feesPlan = quotaPlan
+      }
+
+      if (!feesPlan) {
+        feesPlan = (await planQuery.clone().whereNull('quota_id').first()) || (await planQuery.first())
+      }
+    }
+
+    // 5. Fetch fee details & breakdown
+    let feeDetails: FeesPlanDetails[] = []
+    if (feesPlan) {
+      feeDetails = await FeesPlanDetails.query()
+        .preload('installments_breakdown')
+        .where('fees_plan_id', feesPlan.id)
+    }
+
+    // 6. Fetch all fee types for friendly labels
+    const allFeeTypes = await FeesType.query()
+    const feeTypeNameMap = new Map<number, string>()
+    allFeeTypes.forEach((ft) => feeTypeNameMap.set(ft.id, ft.name))
+
+    // 7. Calculate ledger & statement values
+    const lockedTotalFee = Number(
+      feeMaster?.locked_amount || feeMaster?.total_amount || feesPlan?.total_amount || 0
+    )
+    const paidAmount = Number(feeMaster?.paid_amount || 0)
+    const discountedAmount = Number(feeMaster?.discounted_amount || 0)
+    const netPayable = Math.max(0, lockedTotalFee - discountedAmount)
+    const outstandingBalance = Math.max(0, netPayable - paidAmount)
+    const isLocked = feeMaster?.is_locked ?? (feeMaster !== null)
+    const lockedAt = feeMaster?.locked_at || feeMaster?.createdAt || null
+    const lockedCohortYear = feeMaster?.locked_academic_year || enrollment?.academic_year || null
+
+    // 8. Granular breakdown by component & installment
+    const breakdown = feeDetails.map((detail) => {
+      const typeName = feeTypeNameMap.get(detail.fees_type_id) || `Fee Component #${detail.fees_type_id}`
+      const totalComponent = Number(detail.total_amount)
+
+      const installments = (detail.installments_breakdown || []).map((ib) => {
+        const matchingPaid = (feeMaster?.paid_fees || []).find((p) => p.installment_id === ib.id)
+        const scheduledAmount = Number(ib.installment_amount)
+        const paidInstAmount = Number(matchingPaid?.paid_amount || 0)
+        const remAmount = Math.max(0, scheduledAmount - paidInstAmount)
+
+        return {
+          installment_id: ib.id,
+          installment_no: ib.installment_no,
+          due_date: ib.due_date,
+          scheduled_amount: scheduledAmount,
+          paid_amount: paidInstAmount,
+          remaining_amount: remAmount,
+          status: matchingPaid
+            ? matchingPaid.status
+            : new Date(ib.due_date) < new Date()
+              ? 'Overdue'
+              : 'Unpaid',
+          payment_date: matchingPaid?.payment_date || null,
+          transaction_reference: matchingPaid?.transaction_reference || null,
+          payment_mode: matchingPaid?.payment_mode || null,
+        }
+      })
+
+      const paidComponent = installments.reduce((acc, inst) => acc + inst.paid_amount, 0)
+      const dueComponent = Math.max(0, totalComponent - paidComponent)
+
+      return {
+        fee_plan_details_id: detail.id,
+        fees_type_id: detail.fees_type_id,
+        fee_type_name: typeName,
+        installment_type: detail.installment_type,
+        total_installment: detail.total_installment,
+        total_amount: totalComponent,
+        paid_amount: paidComponent,
+        due_amount: dueComponent,
+        installments: installments,
+      }
+    })
+
+    // 9. Chronological Transaction History
+    const transactionHistory = (feeMaster?.paid_fees || []).map((pf) => ({
+      id: pf.id,
+      transaction_reference: pf.transaction_reference || `REC-${pf.id}`,
+      payment_date: pf.payment_date,
+      payment_mode: pf.payment_mode,
+      amount: Number(pf.paid_amount),
+      remaining_amount: Number(pf.remaining_amount || 0),
+      discounted_amount: Number(pf.discounted_amount || 0),
+      status: pf.status,
+      payment_status: pf.payment_status,
+      remarks: pf.remarks,
+      installment_no: pf.installment?.installment_no || null,
+      due_date: pf.installment?.due_date || null,
+    }))
+
+    const fullName = `${student.first_name} ${student.middle_name ? student.middle_name + ' ' : ''}${student.last_name}`.trim()
+
+    return {
+      statement_date: new Date().toISOString(),
+      student: {
+        id: student.id,
+        first_name: student.first_name,
+        middle_name: student.middle_name,
+        last_name: student.last_name,
+        full_name: fullName,
+        gr_no: student.gr_no,
+        roll_number:
+          student.first_year_roll_number ||
+          student.second_year_roll_number ||
+          student.third_year_roll_number ||
+          student.fourth_year_roll_number ||
+          'N/A',
+        enrollment_code: (student as any).enrollment_code || null,
+        class_name: (enrollment?.division as any)?.class?.class || 'N/A',
+        division_name: enrollment?.division?.division || 'N/A',
+        quota_id: enrollment?.quota?.id || enrollment?.quota_id || null,
+        quota_name: enrollment?.quota?.name || 'General Quota',
+        enrollment_year: enrollment?.academic_year || null,
+        cohort_session: enrollment?.academic_year
+          ? `${enrollment.academic_year}-${enrollment.academic_year + 1}`
+          : 'N/A',
+      },
+      template: {
+        id: feesPlan?.id || null,
+        name: feesPlan?.name || 'Standard Fee Structure',
+        quota_name: feesPlan?.quota?.name || enrollment?.quota?.name || 'General Quota',
+        cohort_academic_year: lockedCohortYear,
+        is_locked: isLocked,
+        locked_at: lockedAt,
+        locked_total_amount: lockedTotalFee,
+      },
+      financial_summary: {
+        locked_total_fee: lockedTotalFee,
+        concessions_discount: discountedAmount,
+        net_payable: netPayable,
+        paid_amount: paidAmount,
+        outstanding_balance: outstandingBalance,
+        status:
+          feeMaster?.status ||
+          (paidAmount >= netPayable && netPayable > 0
+            ? 'Paid'
+            : paidAmount > 0
+              ? 'Partially Paid'
+              : 'Pending'),
+        payment_percentage:
+          lockedTotalFee > 0
+            ? Math.min(100, Math.round(((paidAmount + discountedAmount) / lockedTotalFee) * 100))
+            : 0,
+      },
+      breakdown: breakdown,
+      transactions: transactionHistory,
+    }
+  }
+
+  /**
+   * Financial Tracking & Reporting: Generate real-time, individual student statement
+   * detailing the locked total fee, amounts paid to date, outstanding balance, and transaction history.
+   */
+  async generateStudentFinancialStatement(ctx: HttpContext) {
+    let student_id = ctx.params.student_id
+    let academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session') || ctx.request.input('academic_session_id')
+
+    if (!student_id) {
+      return ctx.response.status(400).json({ message: 'Student ID is required' })
+    }
+
+    const statementData = await this.getStudentFinancialStatementData(student_id, academic_year)
+    if (!statementData) {
+      return ctx.response.status(404).json({ message: 'Student not found' })
+    }
+
+    return ctx.response.json(statementData)
+  }
+
+  /**
+   * Export individual student financial statement to Excel (.xlsx) and archive in DigitalOcean Spaces
+   */
+  async exportStudentFinancialStatementExcel(ctx: HttpContext) {
+    const student_id = ctx.params.student_id
+    const academic_year = ctx.request.input('academic_year') || ctx.request.input('academic_session')
+
+    if (!student_id) {
+      return ctx.response.status(400).json({ success: false, message: 'Student ID is required' })
+    }
+
+    const data = await this.getStudentFinancialStatementData(student_id, academic_year)
+    if (!data) {
+      return ctx.response.status(404).json({ success: false, message: 'Student financial data not found' })
+    }
+
+    const { student, template, financial_summary, breakdown, transactions } = data
+
+    // Create Excel Workbook
+    const wb = xlsx.utils.book_new()
+
+    // ── Sheet 1: Financial Summary ───────────────────────────────────────────
+    const summaryAoa: any[][] = [
+      ['C. N. KOTHARI HOMOEOPATHIC MEDICAL COLLEGE & RESEARCH CENTRE, VYARA'],
+      ['STUDENT FINANCIAL STATEMENT & AUDIT REPORT'],
+      [],
+      ['1. STUDENT PROFILE', ''],
+      ['Student Name', student.full_name],
+      ['GR Number', student.gr_no || 'N/A'],
+      ['Enrollment Code', student.enrollment_code || 'N/A'],
+      ['Class & Division', `${student.class_name} - ${student.division_name}`],
+      ['Quota Category', student.quota_name || 'General Quota'],
+      ['Academic Session', student.cohort_session || 'N/A'],
+      [],
+      ['2. FEE STRUCTURE & SETTLEMENT SUMMARY', ''],
+      ['Fee Plan Template', template.name],
+      ['Total Scheduled Fees (₹)', financial_summary.locked_total_fee],
+      ['Concessions / Discounts (₹)', financial_summary.concessions_discount],
+      ['Net Payable Fees (₹)', financial_summary.net_payable],
+      ['Total Amount Paid to Date (₹)', financial_summary.paid_amount],
+      ['Current Outstanding Balance (₹)', financial_summary.outstanding_balance],
+      ['Settlement Status', financial_summary.status],
+      ['Payment Progress (%)', `${financial_summary.payment_percentage}%`],
+      [],
+      ['Report Generated At', new Date().toLocaleString('en-IN')],
+    ]
+
+    const wsSummary = xlsx.utils.aoa_to_sheet(summaryAoa)
+    wsSummary['!cols'] = [{ wch: 35 }, { wch: 45 }]
+    xlsx.utils.book_append_sheet(wb, wsSummary, 'Summary')
+
+    // ── Sheet 2: Installments & Due Dates ────────────────────────────────────
+    const instHeaders = [
+      'Fee Component',
+      'Term / Installment',
+      'Due Date',
+      'Scheduled (₹)',
+      'Paid (₹)',
+      'Remaining (₹)',
+      'Status',
+      'Payment Date',
+      'Receipt Reference',
+    ]
+    const instRows: any[][] = []
+    for (const comp of breakdown) {
+      for (const inst of comp.installments) {
+        instRows.push([
+          comp.fee_type_name,
+          `Term #${inst.installment_no}`,
+          inst.due_date ? String(inst.due_date).slice(0, 10) : 'N/A',
+          inst.scheduled_amount,
+          inst.paid_amount,
+          inst.remaining_amount,
+          inst.status,
+          inst.payment_date ? String(inst.payment_date).slice(0, 10) : '-',
+          inst.transaction_reference || '-',
+        ])
+      }
+    }
+    const wsInstallments = xlsx.utils.aoa_to_sheet([instHeaders, ...instRows])
+    wsInstallments['!cols'] = [
+      { wch: 25 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 22 },
+    ]
+    xlsx.utils.book_append_sheet(wb, wsInstallments, 'Installments')
+
+    // ── Sheet 3: Transaction Ledger ──────────────────────────────────────────
+    const txnHeaders = [
+      'Receipt / UTR Reference',
+      'Payment Date',
+      'Payment Mode',
+      'Amount Paid (₹)',
+      'Payment Status',
+      'Cashier Remarks',
+    ]
+    const txnRows: any[][] = (transactions || []).map((t: any) => [
+      t.transaction_reference,
+      t.payment_date ? String(t.payment_date).slice(0, 10) : 'N/A',
+      t.payment_mode || 'Cash',
+      t.amount,
+      t.status || 'Success',
+      t.remarks || '-',
+    ])
+    const wsTransactions = xlsx.utils.aoa_to_sheet([txnHeaders, ...txnRows])
+    wsTransactions['!cols'] = [
+      { wch: 25 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 16 },
+      { wch: 35 },
+    ]
+    xlsx.utils.book_append_sheet(wb, wsTransactions, 'Transactions')
+
+    // Generate Excel Buffer
+    const excelBuffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' })
+
+    // Generate identifiable file name:
+    // Format: CNKHMC_FeeStatement_[GR_NO]_[STUDENT_NAME]_[ACADEMIC_YEAR]_[TIMESTAMP].xlsx
+    const cleanGrNo = String(student.gr_no || 'NOGR').trim().replace(/[^a-zA-Z0-9]/g, '_')
+    const cleanName = student.full_name.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '')
+    const cleanSession = String(student.cohort_session || 'SESSION').trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')
+    const now = new Date()
+    const ymd = now.toISOString().slice(0, 10).replace(/-/g, '')
+    const hh = String(now.getHours()).padStart(2, '0')
+    const mm = String(now.getMinutes()).padStart(2, '0')
+    const fileName = `CNKHMC_FeeStatement_${cleanGrNo}_${cleanName}_${cleanSession}_${ymd}_${hh}${mm}.xlsx`
+
+    // Upload to DigitalOcean Spaces
+    const uploadResult = await SpacesService.uploadExport(
+      'fee-statements',
+      fileName,
+      Buffer.from(excelBuffer),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+    return ctx.response.json({
+      success: true,
+      message: 'Student fee statement exported successfully to DigitalOcean Spaces',
+      file_name: fileName,
+      file_url: uploadResult.url,
+      is_cloud: uploadResult.isCloud,
+      storage_key: uploadResult.key,
+      student_name: student.full_name,
+      gr_no: student.gr_no,
+      summary: financial_summary,
+    })
+  }
+
+  /**
+   * Explicit administrative action to lock a specific fee template to a student
+   * (establishing grandfathered cohort structure).
+   */
+  async lockStudentFeeTemplate(ctx: HttpContext) {
+    if (!(await Access.allows(ctx.auth.user!, 'update', 'Fees', [1, 2, 3, 4, 5, 7, 8, 11]))) {
+      return ctx.response.status(401).json({
+        message: 'You are not authorized to perform this action!',
+      })
+    }
+
+    const { student_id, fees_plan_id, academic_year } = ctx.request.only([
+      'student_id',
+      'fees_plan_id',
+      'academic_year',
+    ])
+
+    if (!student_id || !fees_plan_id) {
+      return ctx.response.status(400).json({ message: 'student_id and fees_plan_id are required' })
+    }
+
+    const plan = await FeesPlan.query().preload('quota').where('id', fees_plan_id).first()
+    if (!plan) {
+      return ctx.response.status(404).json({ message: 'Fee template not found' })
+    }
+
+    let feeMaster = await StudentFeesMaster.query().where('student_id', student_id).first()
+    const targetYear = academic_year || plan.academic_year
+
+    if (feeMaster) {
+      await feeMaster
+        .merge({
+          fees_plan_id: plan.id,
+          total_amount: Number(plan.total_amount),
+          due_amount: Math.max(
+            0,
+            Number(plan.total_amount) - Number(feeMaster.paid_amount) - Number(feeMaster.discounted_amount)
+          ),
+          is_locked: true,
+          locked_at: DateTime.now(),
+          locked_amount: Number(plan.total_amount),
+          locked_academic_year: targetYear,
+        })
+        .save()
+    } else {
+      feeMaster = await StudentFeesMaster.create({
+        student_id: student_id,
+        fees_plan_id: plan.id,
+        academic_year: targetYear,
+        total_amount: Number(plan.total_amount),
+        paid_amount: 0,
+        discounted_amount: 0,
+        due_amount: Number(plan.total_amount),
+        status: 'Pending',
+        is_locked: true,
+        locked_at: DateTime.now(),
+        locked_amount: Number(plan.total_amount),
+        locked_academic_year: targetYear,
+      })
+    }
+
+    return ctx.response.json({
+      message: 'Fee template successfully locked to student under cohort grandfathering rule.',
+      student_fees_master: feeMaster,
+    })
+  }
 }

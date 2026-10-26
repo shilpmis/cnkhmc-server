@@ -104,6 +104,7 @@ export default class AuthController {
       let user = await User.query()
         .preload('school')
         .preload('role')
+        .preload('policies')
         .preload('staff', (query) => {
           query.preload('role_type')
           query.preload('enrollments')
@@ -144,6 +145,7 @@ export default class AuthController {
       let userQuery = User.query()
         .preload('school')
         .preload('role')
+        .preload('policies')
 
       if (ctx.auth.user.staff_id) {
         userQuery.preload('staff', (query) => {

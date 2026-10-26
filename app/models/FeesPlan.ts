@@ -1,8 +1,9 @@
-import { column, hasMany } from '@adonisjs/lucid/orm'
+import { column, hasMany, belongsTo } from '@adonisjs/lucid/orm'
 import Base from './base.js'
 import ConcessionFeesPlanMaster from './ConcessionFeesPlanMaster.js'
-import type { HasMany } from '@adonisjs/lucid/types/relations'
+import type { HasMany, BelongsTo } from '@adonisjs/lucid/types/relations'
 import FeesPlanDetails from './FeesPlanDetails.js'
+import Quota from './Quota.js'
 
 export default class FeesPlan extends Base {
   public static table = 'fees_plans'
@@ -17,16 +18,24 @@ export default class FeesPlan extends Base {
   declare class_id: number
 
   @column()
+  declare quota_id: number | null
+
+  @column()
   declare name: string
 
   @column()
-  declare description: string
+  declare description: string | null
 
   @column()
   declare total_amount: number
 
   @column()
   declare status: 'Active' | 'Inactive'
+
+  @belongsTo(() => Quota, {
+    foreignKey: 'quota_id',
+  })
+  declare quota: BelongsTo<typeof Quota>
 
   @hasMany(() => FeesPlanDetails, {
     foreignKey: 'fees_plan_id',

@@ -16,13 +16,27 @@ export default class QuotasController {
   }
 
   public async listAllQuotas(ctx: HttpContext) {
-    if (!ctx.request.qs().academic_session) {
-      return ctx.response.badRequest({ message: 'Academic session ID is required' })
+    const schoolId = ctx.auth.user?.school_id || 1
+    const academicSession = ctx.request.qs().academic_session || ctx.request.qs().academic_year
+
+    let query = Quota.query().where('is_active', true)
+    if (academicSession) {
+      const yearQuotas = await Quota.query()
+        .where('school_id', schoolId as number)
+        .andWhere('academic_year', academicSession)
+        .andWhere('is_active', true)
+
+      if (yearQuotas.length > 0) {
+        return yearQuotas
+      }
     }
 
-    return await Quota.query()
-      .where('school_id', ctx.auth.user!.school_id as number)
-      .andWhere('academic_year', ctx.request.qs().academic_session)
+    const schoolQuotas = await query.clone().where('school_id', schoolId as number)
+    if (schoolQuotas.length > 0) {
+      return schoolQuotas
+    }
+
+    return await query
   }
 
   public async delete({ params, response }: HttpContext) {

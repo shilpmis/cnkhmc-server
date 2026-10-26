@@ -3,10 +3,12 @@ import DailyDiary from '#models/DailyDiary'
 import DailyDiaryManualEntry from '#models/DailyDiaryManualEntry'
 import DiaryLogPermission from '#models/DiaryLogPermission'
 import LessonPlanTopic from '#models/LessonPlanTopic'
+import Staff from '#models/Staff'
 import db from '@adonisjs/lucid/services/db'
 import { DateTime } from 'luxon'
 import path from 'node:path'
 import fs from 'node:fs'
+import SpacesService from '#services/SpacesService'
 // @ts-ignore
 import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
@@ -416,7 +418,7 @@ export default class DailyDiariesController {
   }
 
   async exportPDF({ request, response, auth }: HttpContext) {
-    const { startDate, endDate, staffId } = request.qs()
+    const { startDate, endDate, staffId, subject, className } = request.qs()
     const user = auth.user!
     await user.load('role')
     const userRole = user.role?.role || 'UNKNOWN'
@@ -458,6 +460,26 @@ export default class DailyDiariesController {
       })
     }
 
+    if (subject && subject !== 'all') {
+      query.whereHas('periodConfig', (pq) => {
+        pq.whereHas('period_config_subject', (sq) => {
+          sq.whereHas('subject', (subq) => {
+            subq.where('name', subject)
+          })
+        })
+      })
+    }
+
+    if (className && className !== 'all') {
+      query.whereHas('periodConfig', (pq) => {
+        pq.whereHas('period_config_class_day', (cq) => {
+          cq.whereHas('class', (clq) => {
+            clq.where('class', className)
+          })
+        })
+      })
+    }
+
     if (user.school_id) {
       query.whereHas('periodConfig', (pq) => {
         pq.whereHas('period_config_class_day', (cq) => {
@@ -479,22 +501,41 @@ export default class DailyDiariesController {
     }
     const manualLogs = await manualQuery.orderBy('date', 'desc').orderBy('id', 'desc')
 
-    const allSubtopicIds = new Set<number>()
-    logs.forEach(log => {
-      if (log.subtopicIds && Array.isArray(log.subtopicIds)) {
-        log.subtopicIds.forEach(id => allSubtopicIds.add(id))
+    // Determine Teacher Name for Heading
+    let teacherHeading = ''
+    if (targetStaffId) {
+      try {
+        const staff = await Staff.find(targetStaffId)
+        if (staff) {
+          teacherHeading = `${staff.first_name} ${staff.last_name}`.trim()
+        }
+      } catch (err) {
+        console.error('Error finding staff for heading:', err)
       }
-    })
-
-    let subtopicsMetadata: Record<number, any> = {}
-    if (allSubtopicIds.size > 0) {
-      const subtopics = await db.from('lesson_plan_subtopics')
-        .whereIn('id', Array.from(allSubtopicIds))
-        .select('id', 'topic_id', 'required_hours', 'lesson_plan_number', 'name', 'code')
-
-      subtopics.forEach(s => {
-        subtopicsMetadata[s.id] = s
+    }
+    if (!teacherHeading) {
+      const teachersSet = new Set<string>()
+      logs.forEach((log) => {
+        const s = log.staffEnrollment?.staff
+        if (s) teachersSet.add(`${s.first_name} ${s.last_name}`.trim())
       })
+      manualLogs.forEach((m) => {
+        if (m.staff) teachersSet.add(`${m.staff.first_name} ${m.staff.last_name}`.trim())
+      })
+      teacherHeading = teachersSet.size > 0 ? Array.from(teachersSet).join(', ') : 'All Teachers'
+    }
+
+    // Determine Subject Name for Heading
+    let subjectHeading = ''
+    if (subject && subject !== 'all') {
+      subjectHeading = String(subject)
+    } else {
+      const subjectsSet = new Set<string>()
+      logs.forEach((log) => {
+        const sName = log.periodConfig?.period_config_subject?.subject?.name
+        if (sName) subjectsSet.add(sName.trim())
+      })
+      subjectHeading = subjectsSet.size > 0 ? Array.from(subjectsSet).join(', ') : 'All Subjects'
     }
 
     const flatRows: any[] = []
@@ -529,9 +570,7 @@ export default class DailyDiariesController {
         }
       }
 
-      const subjectName = log.periodConfig?.period_config_subject?.subject?.name || '-'
       const className = log.periodConfig?.period_config_class_day?.class?.class || '-'
-      const teacherName = log.staffEnrollment?.staff ? `${log.staffEnrollment.staff.first_name} ${log.staffEnrollment.staff.last_name}` : '-'
       const resources = [log.resourcesUsed, log.attendanceRemarks].filter(Boolean).join(' | ') || '-'
 
       const durationsObj = log.topicDurations
@@ -544,25 +583,12 @@ export default class DailyDiariesController {
         }
       }
 
-      let lpNoStr = '-'
-      if (log.subtopicIds && Array.isArray(log.subtopicIds) && log.subtopicIds.length > 0) {
-        const lpSet = new Set<string>()
-        log.subtopicIds.forEach(subId => {
-          const sub = subtopicsMetadata[subId]
-          if (sub && sub.lesson_plan_number) lpSet.add(sub.lesson_plan_number)
-        })
-        if (lpSet.size > 0) lpNoStr = Array.from(lpSet).join(', ')
-      }
-
       flatRows.push([
-        { text: dateStr, alignment: 'center', fontSize: 7 },
-        { text: className, alignment: 'center', fontSize: 7 },
-        { text: subjectName, fontSize: 7 },
-        { text: teacherName, fontSize: 7 },
-        { text: log.topicCovered || '-', fontSize: 7 },
-        { text: lpNoStr, alignment: 'center', fontSize: 7 },
-        { text: loggedHours !== '-' ? `${loggedHours}h` : '-', alignment: 'center', fontSize: 7 },
-        { text: resources, fontSize: 7 }
+        { text: dateStr, alignment: 'center', fontSize: 8 },
+        { text: className, alignment: 'center', fontSize: 8 },
+        { text: log.topicCovered || '-', fontSize: 8 },
+        { text: loggedHours !== '-' ? `${loggedHours}h` : '-', alignment: 'center', fontSize: 8 },
+        { text: resources, fontSize: 8 }
       ])
     })
 
@@ -590,12 +616,10 @@ export default class DailyDiariesController {
         }
       }
 
-      const teacherName = m.staff ? `${m.staff.first_name} ${m.staff.last_name}` : '-'
       manualFlatRows.push([
-        { text: dateStr, alignment: 'center', fontSize: 7 },
-        { text: m.time || '-', alignment: 'center', fontSize: 7 },
-        { text: m.description || '-', fontSize: 7 },
-        { text: teacherName, fontSize: 7 }
+        { text: dateStr, alignment: 'center', fontSize: 8 },
+        { text: m.time || '-', alignment: 'center', fontSize: 8 },
+        { text: m.description || '-', fontSize: 8 }
       ])
     })
 
@@ -603,10 +627,7 @@ export default class DailyDiariesController {
       [
         { text: 'Date', style: 'tableHeader', alignment: 'center' },
         { text: 'Class', style: 'tableHeader', alignment: 'center' },
-        { text: 'Subject', style: 'tableHeader' },
-        { text: 'Teacher', style: 'tableHeader' },
         { text: 'Topic / Subtopic Covered', style: 'tableHeader' },
-        { text: 'LP No.', style: 'tableHeader', alignment: 'center' },
         { text: 'Hours', style: 'tableHeader', alignment: 'center' },
         { text: 'Resources / Remarks', style: 'tableHeader' }
       ],
@@ -635,17 +656,44 @@ export default class DailyDiariesController {
               stack: [
                 { text: 'C. N. Kothari Homoeopathic Medical College', style: 'collegeTitle', alignment: 'center' },
                 { text: '& Research Centre - VYARA', style: 'collegeTitle', alignment: 'center' },
-                { text: 'DAILY DIARY / TEACHER LOGS REPORT', style: 'reportTitle', alignment: 'center' }
+                { text: 'DAILY DIARY / TEACHER LOGS REPORT', style: 'reportTitle', alignment: 'center' },
+                {
+                  table: {
+                    widths: ['50%', '50%'],
+                    body: [
+                      [
+                        {
+                          text: [
+                            { text: 'Teacher: ', bold: true, color: '#1e293b' },
+                            { text: teacherHeading, bold: true, color: '#0f172a' }
+                          ],
+                          alignment: 'left',
+                          fontSize: 9
+                        },
+                        {
+                          text: [
+                            { text: 'Subject: ', bold: true, color: '#1e293b' },
+                            { text: subjectHeading, bold: true, color: '#0f172a' }
+                          ],
+                          alignment: 'right',
+                          fontSize: 9
+                        }
+                      ]
+                    ]
+                  },
+                  layout: 'noBorders',
+                  margin: [0, 6, 0, 0]
+                }
               ],
               margin: [-30, 5, 0, 0]
             }
           ],
-          margin: [0, 0, 0, 8]
+          margin: [0, 0, 0, 10]
         },
         {
           table: {
             headerRows: 1,
-            widths: [55, 50, 90, 100, '*', 45, 40, 100],
+            widths: [65, 65, '*', 45, 140],
             body: gridBody
           },
           layout: {
@@ -653,10 +701,10 @@ export default class DailyDiariesController {
             vLineWidth: (i: number, node: any) => (i === 0 || i === node.table.widths.length) ? 1 : 0.5,
             hLineColor: () => '#475569',
             vLineColor: () => '#475569',
-            paddingLeft: () => 4,
-            paddingRight: () => 4,
-            paddingTop: () => 4,
-            paddingBottom: () => 4
+            paddingLeft: () => 5,
+            paddingRight: () => 5,
+            paddingTop: () => 5,
+            paddingBottom: () => 5
           },
           margin: [0, 0, 0, 12]
         },
@@ -665,13 +713,12 @@ export default class DailyDiariesController {
           {
             table: {
               headerRows: 1,
-              widths: [65, 100, '*', 120],
+              widths: [75, 100, '*'],
               body: [
                 [
                   { text: 'Date', style: 'tableHeader', alignment: 'center' },
                   { text: 'Time', style: 'tableHeader', alignment: 'center' },
-                  { text: 'Description of Work Done', style: 'tableHeader' },
-                  { text: 'Teacher', style: 'tableHeader' }
+                  { text: 'Description of Work Done', style: 'tableHeader' }
                 ],
                 ...manualFlatRows
               ]
@@ -713,10 +760,28 @@ export default class DailyDiariesController {
 
     const printer = new PdfPrinter(fonts, fs as any, { resolve: () => { }, resolved: () => Promise.resolve() })
     const pdfDoc = await (printer as any).createPdfKitDocument(docDefinition)
+    const chunks: Buffer[] = []
+    pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk))
+    const pdfBufferPromise = new Promise<Buffer>((resolve, reject) => {
+      pdfDoc.on('end', () => resolve(Buffer.concat(chunks)))
+      pdfDoc.on('error', reject)
+    })
     pdfDoc.end()
+    const pdfBuffer = await pdfBufferPromise
+
+    const filename = `Daily_Diary_Report_${Date.now()}.pdf`
+
+    // Upload to DigitalOcean Spaces
+    try {
+      const uploadResult = await SpacesService.uploadExport('daily-diaries', filename, pdfBuffer)
+      response.header('x-cloud-url', uploadResult.url)
+      response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+    } catch (e) {
+      console.error('[DailyDiariesController] Failed to upload export to Spaces:', e)
+    }
 
     response.header('Content-Type', 'application/pdf')
-    response.header('Content-Disposition', `attachment; filename="Daily_Diary_Report.pdf"`)
-    return response.stream(pdfDoc)
+    response.header('Content-Disposition', `attachment; filename="${filename}"`)
+    return response.send(pdfBuffer)
   }
 }

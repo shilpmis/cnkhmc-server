@@ -10,6 +10,18 @@ export default class InventoryDepartmentsController {
         query.preload('deadStock')
       })
 
+    const formatDate = (date: any): string | null => {
+      if (!date) return null
+      if (typeof date.toISODate === 'function') return date.toISODate()
+      if (date instanceof Date) {
+        const y = date.getFullYear()
+        const m = String(date.getMonth() + 1).padStart(2, '0')
+        const d = String(date.getDate()).padStart(2, '0')
+        return `${y}-${m}-${d}`
+      }
+      return String(date)
+    }
+
     const departmentsWithItems = departments.map((dept) => {
       const deptJSON = dept.toJSON()
       const itemMap = new Map<number, any>()
@@ -22,6 +34,14 @@ export default class InventoryDepartmentsController {
           itemMap.set(item.id, {
             id: item.id,
             itemName: item.itemName,
+            invoiceNumber: item.invoiceNumber || null,
+            supplierName: item.supplierName || null,
+            purchaseDate: formatDate(item.purchaseDate),
+            unitPrice: Number(item.unitPrice) || 0,
+            totalQuantity: Number(item.totalQuantity) || 0,
+            totalAmount: Number(item.totalAmount) || 0,
+            availableQuantity: Number(item.availableQuantity) || 0,
+            expiryDate: formatDate(item.expiryDate),
             quantity: 0
           })
         }

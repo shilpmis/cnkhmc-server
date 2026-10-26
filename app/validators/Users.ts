@@ -9,6 +9,7 @@ export const CreateValidatorForUsers = vine.compile(
     role_id: vine.number(),
     username: vine.string().trim().minLength(3).maxLength(30),
     password: vine.string().minLength(8),
+    policy_ids: vine.array(vine.number()).optional(),
   })
 )
 
@@ -19,6 +20,7 @@ export const CreateValidatorForOnBoardTeacherAsUser = vine.compile(
     password: vine.string().minLength(8),
     assign_classes: vine.array(vine.number().min(1)).optional(),
     is_active: vine.boolean(),
+    policy_ids: vine.array(vine.number()).optional(),
   })
 )
 
@@ -27,6 +29,7 @@ export const UpdateValidatorForOnBoardTeacherAsUser = vine.compile(
     is_active: vine.boolean().optional(),
     assign_classes: vine.array(vine.number().min(1)).optional(),
     unassign_classes: vine.array(vine.number().min(1)).optional(),
+    policy_ids: vine.array(vine.number()).optional(),
   })
 )
 
@@ -35,5 +38,6 @@ export const UpdateValidatorForUsers = vine.compile(
     name: vine.string().trim().minLength(3).maxLength(30).optional(),
     username: vine.string().trim().minLength(3).maxLength(30).optional(),
     is_active: vine.boolean().optional(),
+    policy_ids: vine.array(vine.number()).optional(),
   })
 )

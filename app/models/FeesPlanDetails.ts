@@ -1,9 +1,10 @@
 //import { DateTime } from 'luxon'
 //import { column } from '@ioc:Adonis/Lucid/Orm'
 import Base from '#models/base'
-import { column, hasMany } from '@adonisjs/lucid/orm'
+import { column, hasMany, belongsTo } from '@adonisjs/lucid/orm'
 import InstallmentBreakDowns from './InstallmentBreakDowns.js'
-import type { HasMany } from '@adonisjs/lucid/types/relations'
+import FeesType from './FeesType.js'
+import type { HasMany, BelongsTo } from '@adonisjs/lucid/types/relations'
 
 export default class FeesPlanDetails extends Base {
   public static table = 'fees_plan_details'
@@ -28,6 +29,11 @@ export default class FeesPlanDetails extends Base {
 
   @column()
   declare status: 'Active' | 'Inactive'
+
+  @belongsTo(() => FeesType, {
+    foreignKey: 'fees_type_id',
+  })
+  declare fees_type: BelongsTo<typeof FeesType>
 
   @hasMany(() => InstallmentBreakDowns, {
     foreignKey: 'fee_plan_details_id',

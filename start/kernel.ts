@@ -48,6 +48,9 @@ router.use([
 export const middleware = router.named({
   auth: () => import('#middleware/auth_middleware'),
   checkAccess: () => import('#middleware/check_access_middleware'),
+  piiAudit: () => import('#middleware/pii_audit_middleware'),
+  templateGate: () => import('#middleware/template_gate_middleware'),
+  rateLimit: () => import('#middleware/rate_limit_middleware'),
 })
 
 /**

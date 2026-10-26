@@ -1,4 +1,5 @@
 import SalaryComponents from '#models/SalaryComponents'
+import Access from '#services/access_control'
 import SalaryTemplates from '#models/SalaryTemplates'
 import SatffPayrunComponents from '#models/SatffPayrunComponents'
 import SatffPayrunTemplates from '#models/SatffPayrunTemplates'
@@ -106,7 +107,7 @@ export default class PayrollController {
 
     const payload = await CreateValidatorForSalaryComponent.validate(ctx.request.body())
 
-    if (role_id == 1 || role_id == 2) {
+    if (role_id == 1 || role_id == 2 || (await Access.templateAllows(ctx.auth.user!, 'create', 'Payroll'))) {
       if (payload.component_type == 'deduction') {
         if (payload.deduction_frequency == null) {
           return ctx.response.status(422).json({ message: 'Deduction frequency is required' })
@@ -209,7 +210,7 @@ export default class PayrollController {
     const role_id = ctx.auth.user!.role_id
     const salary_component_id = ctx.params.component_id
 
-    if (role_id == 1 || role_id == 2) {
+    if (role_id == 1 || role_id == 2 || (await Access.templateAllows(ctx.auth.user!, 'update', 'Payroll'))) {
       const payload = await UpdateValidatorForSalaryComponent.validate(ctx.request.body())
 
       let salary_component = await SalaryComponents.query()
@@ -267,7 +268,7 @@ export default class PayrollController {
     const role_id = ctx.auth.user!.role_id
     const salary_component_id = ctx.params.component_id
 
-    if (role_id == 1 || role_id == 2) {
+    if (role_id == 1 || role_id == 2 || (await Access.templateAllows(ctx.auth.user!, 'delete', 'Payroll'))) {
       let salary_component = await SalaryComponents.query()
         .where('school_id', school_id as number)
         .andWhere('id', salary_component_id as number)
@@ -358,7 +359,7 @@ export default class PayrollController {
      * Need to add validatioin for duplicate entry for same
      *  */
 
-    if (role_id == 1 || role_id == 2) {
+    if (role_id == 1 || role_id == 2 || (await Access.templateAllows(ctx.auth.user!, 'create', 'Payroll'))) {
       let trx = await db.transaction()
       try {
         let salary_template = await SalaryTemplates.create(
@@ -655,7 +656,7 @@ export default class PayrollController {
     const { template_components, ...payload } =
       await CreateValidatorForStaffSalaryTemplates.validate(ctx.request.body())
 
-    if (role_id == 1 || role_id == 2) {
+    if (role_id == 1 || role_id == 2 || (await Access.templateAllows(ctx.auth.user!, 'create', 'Payroll'))) {
       let staff_enrollment = await StaffEnrollment.query()
         .preload('staff')
         .where('academic_year', accademic_session.id)
@@ -815,7 +816,7 @@ export default class PayrollController {
       return ctx.response.status(404).json({ message: 'Staff Salary Template not found' })
     }
 
-    if (role_id == 1 || role_id == 2) {
+    if (role_id == 1 || role_id == 2 || (await Access.templateAllows(ctx.auth.user!, 'update', 'Payroll'))) {
       let {
         existing_salary_components,
         new_salary_components,

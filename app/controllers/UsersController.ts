@@ -17,25 +17,78 @@ export default class UsersController {
   async indexSchoolUsers(ctx: HttpContext) {
     const page = ctx.request.input('page', 1)
     const type = ctx.request.input('type')
-    if (type === 'teachers') {
-      const users = await Users.query()
+    if (type === 'teachers' || type === 'staff') {
+      const staffCategory = ctx.request.input('staff_category')
+      const query = Users.query()
         .preload('staff', (query) => {
+          query.preload('role_type')
           query.preload('assigend_classes', (query) => {
             query.preload('divisions')
             query.where('status', 'Active')
           })
-          query.select('id', 'first_name', 'last_name', 'middle_name') // Only fetching required staff fields
         })
-        .where('role_id', 6)
-        .andWhere('school_id', ctx.auth.user!.school_id as number)
-        .paginate(page, 6)
+        .preload('policies')
+        .where('school_id', ctx.auth.user!.school_id as number)
+        .whereNotNull('staff_id')
+
+      if (staffCategory === 'teaching') {
+        query.whereHas('staff', (sq) => {
+          sq.where((q) => {
+            q.where('staff_type', 'Teaching')
+              .orWhere('staff_type', 'Teaching Staff')
+              .orWhere((inner) => {
+                inner
+                  .where((stq) => {
+                    stq
+                      .whereNull('staff_type')
+                      .orWhere((notOther) => {
+                        notOther
+                          .whereNot('staff_type', 'Hospital Staff')
+                          .whereNot('staff_type', 'Non-Teaching Staff')
+                          .whereNot('staff_type', 'Non Teaching')
+                          .whereNot('staff_type', 'Hostel Staff')
+                          .whereNot('staff_type', 'Mess Staff')
+                      })
+                  })
+                  .whereHas('role_type', (rq) => rq.where('is_teaching_role', 1))
+              })
+          })
+        })
+      } else if (staffCategory === 'hospital') {
+        query.whereHas('staff', (sq) => {
+          sq.where('staff_type', 'Hospital Staff')
+        })
+      } else if (staffCategory === 'non-teaching' || staffCategory === 'other') {
+        query.whereHas('staff', (sq) => {
+          sq.where((q) => {
+            q.where('staff_type', 'Non-Teaching Staff')
+              .orWhere('staff_type', 'Non Teaching')
+              .orWhere('staff_type', 'Hostel Staff')
+              .orWhere('staff_type', 'Mess Staff')
+              .orWhere('staff_type', 'Other')
+              .orWhere((inner) => {
+                inner
+                  .where((stq) => {
+                    stq.whereNull('staff_type').orWhereNot('staff_type', 'Hospital Staff')
+                  })
+                  .whereHas('role_type', (rq) => rq.where('is_teaching_role', 0))
+              })
+          }).where((q) => {
+            q.whereNull('staff_type').orWhereNot('staff_type', 'Hospital Staff')
+          })
+        })
+      }
+
+      const users = await query.paginate(page, 10)
       return ctx.response.json(users.serialize())
     }
 
     const users = await Users.query()
+      .preload('policies')
       .where('school_id', ctx.auth.user!.school_id as number)
+      .whereNull('staff_id')
       .andWhereNot('role_id', 6)
-      .paginate(page, 6)
+      .paginate(page, 10)
     return ctx.response.json(users.serialize())
   }
 
@@ -45,8 +98,6 @@ export default class UsersController {
 
       const payload = await CreateValidatorForUsers.validate(ctx.request.all())
       const school = await Schools.findBy('id', school_id)
-
-
 
       if (
         payload.role_id !== 1 &&
@@ -73,28 +124,36 @@ export default class UsersController {
                   ? 'it-admin'
                   : 'default'
 
-      if (ctx.auth.user?.role_id == 1) {
+      if ([1, 2, 5, 8, 11].includes(Number(ctx.auth.user?.role_id))) {
+        const { policy_ids, ...userPayload } = payload
         const user = await User.create({
-          ...payload,
+          ...userPayload,
           school_id: school_id as number,
           is_active: true,
           email: `${user_type}@${school?.branch_code}.saral`,
         })
+
+        if (Array.isArray(policy_ids) && policy_ids.length > 0) {
+          await user.related('policies').attach(policy_ids)
+        }
+
+        await user.load('policies')
         return ctx.response.json(user.serialize())
       } else {
         return ctx.response
           .status(404)
           .json({ message: 'You are not authorized to perform this action' })
       }
-    } catch (error) {
+    } catch (error: any) {
       return ctx.response.status(501).json({
-        message: error,
+        message: error.message || error,
       })
     }
   }
 
   async updateUser(ctx: HttpContext) {
-    if (ctx.auth.user?.id !== 1 && ctx.auth.user?.id !== 2) {
+    const userRoleId = Number(ctx.auth.user?.role_id)
+    if (![1, 2, 5, 8, 11].includes(userRoleId)) {
       return ctx.response
         .status(404)
         .json({ message: 'You are not authorized to perform this action' })
@@ -109,7 +168,16 @@ export default class UsersController {
         .status(404)
         .json({ message: 'You are not authorized to perform this action' })
     }
-    user.merge(payload).save()
+
+    const { policy_ids, ...updatePayload } = payload
+    user.merge(updatePayload)
+    await user.save()
+
+    if (Array.isArray(policy_ids)) {
+      await user.related('policies').sync(policy_ids)
+    }
+
+    await user.load('policies')
     return ctx.response.json(user.serialize())
   }
 
@@ -125,6 +193,7 @@ export default class UsersController {
 
     const staff = await Staff.query()
       .preload('school')
+      .preload('role_type')
       .where('id', payload.staff_id)
       .andWhere('school_id', ctx.auth.user!.school_id as number)
       .first()
@@ -135,6 +204,20 @@ export default class UsersController {
       })
     }
 
+    const existingUser = await User.query()
+      .where('staff_id', staff.id)
+      .first()
+
+    if (existingUser) {
+      return ctx.response.status(400).json({
+        message: 'This staff member is already onboarded as a user',
+      })
+    }
+
+    const isHospitalStaff = staff.staff_type === 'Hospital Staff'
+    const isTeachingStaff = !isHospitalStaff && Boolean(staff.role_type?.is_teaching_role)
+    const assignedRoleId = isTeachingStaff ? 6 : 12
+
     const trx = await db.transaction()
     try {
       const branchCode = staff.school?.branch_code || 'school'
@@ -144,7 +227,7 @@ export default class UsersController {
           school_id: ctx.auth.user!.school_id as number,
           is_active: true,
           password: payload.password,
-          role_id: 6,
+          role_id: assignedRoleId,
           name: staff.first_name + ' ' + staff.last_name,
           username: payload.username,
           email: `${staff.first_name.toLowerCase()}-${staff.last_name.toLowerCase()}@${branchCode}.saral`,
@@ -152,7 +235,7 @@ export default class UsersController {
         { client: trx }
       )
 
-      if (payload.assign_classes) {
+      if (isTeachingStaff && payload.assign_classes && payload.assign_classes.length > 0) {
         for (const division_id of payload.assign_classes) {
           const clas = await Divisions.query().where('id', division_id).first()
 
@@ -185,6 +268,10 @@ export default class UsersController {
           }
         }
       }
+      if (Array.isArray(payload.policy_ids) && payload.policy_ids.length > 0) {
+        await user.related('policies').attach(payload.policy_ids)
+      }
+      await user.load('policies')
       await trx.commit()
       return ctx.response.json(user.serialize())
     } catch (error) {
@@ -221,7 +308,7 @@ export default class UsersController {
 
       // Academic session check removed
 
-      const { assign_classes, unassign_classes, ...payload } =
+      const { assign_classes, unassign_classes, policy_ids, ...payload } =
         await UpdateValidatorForOnBoardTeacherAsUser.validate(ctx.request.all())
 
       if (assign_classes) {
@@ -241,9 +328,6 @@ export default class UsersController {
             .first()
 
           if (already_assigned_class) continue
-
-          // clas.useTransaction(trx)
-          // await clas.merge({ is_assigned: true }).save()
 
           await ClassTeacherMaster.create(
             {
@@ -267,9 +351,6 @@ export default class UsersController {
             })
           }
 
-          // clas.useTransaction(trx)
-          // await clas.merge({ is_assigned: false }).save()
-
           let already_assigned_class = await ClassTeacherMaster.query()
             .where('division_id', division_id)
             .andWhere('staff_id', user.staff.id)
@@ -283,6 +364,11 @@ export default class UsersController {
 
       user.useTransaction(trx)
       await user.merge(payload).save()
+
+      if (Array.isArray(policy_ids)) {
+        await user.related('policies').sync(policy_ids)
+      }
+      await user.load('policies')
       await trx.commit()
       return ctx.response.json(user.serialize())
     } catch (error) {

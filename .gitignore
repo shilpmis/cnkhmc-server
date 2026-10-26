@@ -24,3 +24,6 @@ yarn-error.log
 # Platform specific
 .DS_Store
 scratch/
+
+# old database credentials used for one-off data copies
+.env.old

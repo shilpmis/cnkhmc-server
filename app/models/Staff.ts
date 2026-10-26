@@ -1,5 +1,7 @@
 import Base from '#models/base'
-import { belongsTo, column, hasMany, hasOne } from '@adonisjs/lucid/orm'
+import KavachaColumns from '#services/kavacha_columns'
+import AkshayaVault from '#services/akshaya_vault'
+import { belongsTo, column, hasMany, hasOne, beforeSave } from '@adonisjs/lucid/orm'
 import Schools from './Schools.js'
 import type { BelongsTo, HasMany, HasOne } from '@adonisjs/lucid/types/relations'
 import StaffMaster from './StaffMaster.js'
@@ -100,8 +102,11 @@ export default class Staff extends Base {
   @column()
   declare last_name_in_guj: string | null
 
-  @column()
+  @column(KavachaColumns.options(KavachaColumns.find('staff', 'aadhar_no')))
   declare aadhar_no: number | null
+
+  @column({ serializeAs: null })
+  declare aadhar_no_bidx: string | null
 
   @column()
   declare religion: string | null
@@ -139,8 +144,11 @@ export default class Staff extends Base {
   @column()
   declare bank_name: string | null
 
-  @column()
+  @column(KavachaColumns.options(KavachaColumns.find('staff', 'account_no')))
   declare account_no: number | null
+
+  @column({ serializeAs: null })
+  declare account_no_bidx: string | null
 
   @column()
   declare nationality: string | null
@@ -148,7 +156,11 @@ export default class Staff extends Base {
   @column()
   declare IFSC_code: string | null
 
-  @column()
+  // Stored as "vault:<uuid>" for protected photos; sent to clients as a short-lived signed link.
+  @column({
+    prepare: (value) => AkshayaVault.toStoredValue(value),
+    serialize: (value) => AkshayaVault.toClientUrl(value),
+  })
   declare profile_photo: string | null
 
   @column()
@@ -293,8 +305,11 @@ export default class Staff extends Base {
   @column()
   declare pay_scale: string | null
 
-  @column()
+  @column(KavachaColumns.options(KavachaColumns.find('staff', 'pan_card_no')))
   declare pan_card_no: string | null
+
+  @column({ serializeAs: null })
+  declare pan_card_no_bidx: string | null
 
   @column({
     serialize: (value: Date) => Base.serializeDateAsSQLDateString(value),
@@ -334,8 +349,11 @@ export default class Staff extends Base {
   @column()
   declare epf_no: number | null
 
-  @column()
+  @column(KavachaColumns.options(KavachaColumns.find('staff', 'epf_uan_no')))
   declare epf_uan_no: number | null
+
+  @column({ serializeAs: null })
+  declare epf_uan_no_bidx: string | null
 
   @column()
   declare qualification:
@@ -441,4 +459,10 @@ export default class Staff extends Base {
     foreignKey: 'reporting_to_staff_id',
   })
   declare reporting_manager: BelongsTo<typeof Staff>
+
+  @beforeSave()
+  static sealPiiIndexes(model: Staff) {
+    KavachaColumns.refreshIndexes(model, KavachaColumns.forTable('staff'))
+  }
+
 }

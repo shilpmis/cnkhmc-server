@@ -1,4 +1,7 @@
 import Classes from '#models/Classes'
+import Quota from '#models/Quota'
+import { STUDENT_COLUMNS, normalizeHead, readSheetRow, type StudentColumnKind } from '#services/student_columns'
+import Access from '#services/access_control'
 import type { HttpContext } from '@adonisjs/core/http'
 import {
   CreateValidatorForMultipleStundets,
@@ -16,6 +19,10 @@ import ExcelJS from 'exceljs'
 import StudentEnrollments from '#models/StudentEnrollments'
 import Schools from '#models/Schools'
 import Divisions from '#models/Divisions'
+import SpacesService from '#services/SpacesService'
+import StudentFeesMaster from '#models/StudentFeesMaster'
+import FeesPlan from '#models/FeesPlan'
+import { DateTime } from 'luxon'
 
 // Helper function to generate unique enrollment codes
 export interface GenerateUniqueEnrollmentCodeParams {
@@ -220,6 +227,36 @@ function parseSafeCategory(val: any): any {
   return null
 }
 
+const SCIENTIFIC_NOTATION = /^[+-]?\d+(\.\d+)?e[+-]?\d+$/i
+
+/** One cell of the student sheet, read as the kind of value its head holds. */
+function parseSheetValue(val: any, kind: StudentColumnKind): any {
+  // the sheet writes "-" for an empty cell
+  if (val === null || val === undefined || (typeof val === 'string' && ['', '-'].includes(val.trim()))) {
+    return kind === 'bool' ? false : null
+  }
+  switch (kind) {
+    case 'int':
+      return parseSafeInt(val)
+    case 'float':
+      return parseSafeFloat(val)
+    case 'date':
+      return parseAndFormatDate(val)
+    case 'gender':
+      return parseSafeGender(val)
+    case 'category':
+      return parseSafeCategory(val)
+    case 'blood':
+      return parseSafeBloodGroup(val)
+    case 'aadhar':
+      return parseSafeAadhar(val)
+    case 'bool':
+      return ['true', 'yes', 'y', '1'].includes(String(val).trim().toLowerCase())
+    default:
+      return String(val).trim()
+  }
+}
+
 function parseAdmissionYear(yearStr: string | null | undefined): number | null {
   if (!yearStr) return null
   const trimmed = yearStr.trim()
@@ -302,50 +339,69 @@ export default class StundetsController {
   async fetchStudent(ctx: HttpContext) {
     const student_id = ctx.params.student_id
     const school_id = ctx.auth.user!.school_id
-    let acadamic_session_id = ctx.request.qs().academic_session;
+    let acadamic_session_id = ctx.request.qs().academic_session || ctx.request.qs().academic_year
 
-    if(!acadamic_session_id){
-      return ctx.response.status(400).json({ message: 'Academic session is required' })
-    }
-    
     const is_meta_req = String(ctx.request.input('student_meta', false)) === 'true' || ctx.request.input('student_meta') === true
 
     if (school_id !== ctx.auth.user?.school_id) {
       return ctx.response
         .status(401)
-        .json({ message: 'You are  not authorized to perform this action!' })
+        .json({ message: 'You are not authorized to perform this action!' })
     }
-
-    // Session check removed
 
     try {
       // Fetch the student enrollment record
-      let studentEnrollment = await StudentEnrollments.query()
-        .where('student_id', student_id)
-        .andWhere('academic_year', acadamic_session_id)
-        .first()
+      let studentEnrollment = null
+      if (acadamic_session_id) {
+        studentEnrollment = await StudentEnrollments.query()
+          .where('student_id', student_id)
+          .andWhere('academic_year', acadamic_session_id)
+          .preload('division', (dq) => dq.preload('class'))
+          .first()
+      }
 
       if (!studentEnrollment) {
         studentEnrollment = await StudentEnrollments.query()
           .where('student_id', student_id)
           .orderBy('id', 'desc')
+          .preload('division', (dq) => dq.preload('class'))
           .first()
       }
 
-      if (!studentEnrollment) {
-        return ctx.response.status(404).json({ message: 'No Student Enrollment Available!' })
-      }
-
-      let student: Students | null = null
-
+      let studentQuery = Students.query().where('id', student_id)
       if (is_meta_req) {
-        student = await Students.query().where('id', student_id).preload('student_meta').first()
-      } else {
-        student = await Students.query().where('id', student_id).first()
+        studentQuery = studentQuery.preload('student_meta')
       }
-      return ctx.response
-        .status(200)
-        .json({ ...student?.serialize(), class_id: studentEnrollment.division_id })
+      studentQuery = studentQuery.preload('academic_class', (q) => {
+        q.preload('division', (dq) => dq.preload('class')).orderBy('id', 'desc')
+      })
+
+      const student = await studentQuery.first()
+      if (!student) {
+        return ctx.response.status(404).json({ message: 'Student not found!' })
+      }
+
+      const serializedStudent = student.serialize()
+      const className =
+        studentEnrollment?.division?.class?.class ||
+        studentEnrollment?.division?.division ||
+        studentEnrollment?.division?.aliases ||
+        ''
+
+      const combinedData = {
+        ...serializedStudent,
+        class_id: studentEnrollment ? studentEnrollment.division_id : null,
+        class_name: className,
+        enrollment_no: student.enrollment_code,
+        division: studentEnrollment ? studentEnrollment.division_id : null,
+        academic_year: studentEnrollment ? studentEnrollment.academic_year : null,
+      }
+
+      return ctx.response.status(200).json({
+        success: true,
+        data: combinedData,
+        ...combinedData,
+      })
     } catch (error) {
       return ctx.response
         .status(500)
@@ -355,45 +411,77 @@ export default class StundetsController {
 
   async fetchStudentInDetail(ctx: HttpContext) {
     let student_id = ctx.params.student_id
-    let academic_year = ctx.request.qs().academic_session
+    let academic_year = ctx.request.qs().academic_session || ctx.request.qs().academic_year
 
     if (!student_id) {
       return ctx.response.status(400).json({ message: 'Student ID is required' })
     }
 
-    if (!academic_year) {
-      return ctx.response.status(400).json({ message: 'Academic session is required' })
-    }
-
-    // Session check removed
-
-    let detailed_student_data = await StudentEnrollments.query()
-      .preload('student', (studentQuery) => {
-        studentQuery.preload('student_meta')
-      })
-      .preload('division', (divisionQuery) => {
-        divisionQuery.preload('class')
-        // divisionQuery.where('academic_year', academic_year as number)
-      })
-      .preload('fees_status', (feesStatusQuery) => {
-        feesStatusQuery.preload('paid_fees')
-        feesStatusQuery.where('academic_year', academic_year as number)
-      })
-      .preload('provided_concession', (query) => {
-        query.preload('fees_plan', (query) => {
-          query.where('academic_year', academic_year as number)
+    try {
+      let query = StudentEnrollments.query()
+        .preload('quota')
+        .preload('student', (studentQuery) => {
+          studentQuery.preload('student_meta')
         })
-        query.where('academic_year', academic_year as number)
-      })
-      //. where('academic_year', academic_year)
-      .where('student_id', student_id)
-      .andWhere('academic_year', academic_year as number)
-      .first()
+        .preload('division', (divisionQuery) => {
+          divisionQuery.preload('class')
+        })
+        .preload('fees_status', (feesStatusQuery) => {
+          feesStatusQuery.preload('paid_fees')
+          feesStatusQuery.preload('fees_plan')
+          if (academic_year) {
+            feesStatusQuery.where('academic_year', academic_year as number)
+          }
+        })
+        .preload('provided_concession', (cQuery) => {
+          cQuery.preload('fees_plan', (fpQuery) => {
+            if (academic_year) {
+              fpQuery.where('academic_year', academic_year as number)
+            }
+          })
+          if (academic_year) {
+            cQuery.where('academic_year', academic_year as number)
+          }
+        })
+        .where('student_id', student_id)
 
-    if (!detailed_student_data) {
-      return ctx.response.status(404).json({ message: 'Student not found' })
+      if (academic_year) {
+        query = query.andWhere('academic_year', academic_year as number)
+      } else {
+        query = query.orderBy('id', 'desc')
+      }
+
+      let detailed_student_data = await query.first()
+
+      if (!detailed_student_data) {
+        // Fallback: load student directly
+        const fallbackStudent = await Students.query()
+          .where('id', student_id)
+          .preload('student_meta')
+          .preload('academic_class', (ac) => ac.preload('division', (d) => d.preload('class')).orderBy('id', 'desc'))
+          .first()
+
+        if (!fallbackStudent) {
+          return ctx.response.status(404).json({ message: 'Student not found' })
+        }
+
+        const serialized = fallbackStudent.serialize()
+        return ctx.response.status(200).json({
+          success: true,
+          data: serialized,
+          ...serialized,
+        })
+      }
+
+      const serializedData = detailed_student_data.serialize()
+      return ctx.response.status(200).json({
+        success: true,
+        data: serializedData,
+        ...serializedData,
+      })
+    } catch (error) {
+      return ctx.response.status(500).json({ message: 'Error fetching student detail', error: error.message })
     }
-    return ctx.response.status(200).json(detailed_student_data)
   }
 
   async createSingleStudent(ctx: HttpContext) {
@@ -419,7 +507,7 @@ export default class StundetsController {
       
       console.log('Role check array includes?', [1, 2, 3, 4, 5, 8, 11].includes(Number(ctx.auth.user!.role_id)))
 
-      if (![1, 2, 3, 4, 5, 8, 11].includes(Number(ctx.auth.user!.role_id))) {
+      if (!(await Access.allows(ctx.auth.user!, 'create', 'Student', [1, 2, 3, 4, 5, 8, 11]))) {
         return ctx.response
           .status(401)
           .json({ message: 'You are not authorized to perform this action!' })
@@ -450,18 +538,48 @@ export default class StundetsController {
         enrollment_academic_year = parsedYear
       }
 
+      // Extract assigned quota and fee template if provided
+      const rawPayload = payload as any
+      const assignedQuotaId = rawPayload.quota_id || rawPayload.students_data?.quota_id || null
+      const assignedFeesPlanId = rawPayload.fees_plan_id || rawPayload.students_data?.fees_plan_id || null
+
       // Add a row in the student_enrollments table within the transaction
       await StudentEnrollments.create(
         {
           student_id: student_data.id,
           division_id: class_id,
           academic_year: enrollment_academic_year,
+          quota_id: assignedQuotaId ? Number(assignedQuotaId) : null,
           is_new_admission: true,
           status: 'pursuing',
           remarks: remarks || '',
         },
         { client: trx }
       )
+
+      // If a Fee Template (FeesPlan) was selected, initialize and lock it to the student under cohort grandfathering
+      if (assignedFeesPlanId) {
+        const plan = await FeesPlan.query({ client: trx }).where('id', assignedFeesPlanId).first()
+        if (plan) {
+          await StudentFeesMaster.create(
+            {
+              student_id: student_data.id,
+              fees_plan_id: plan.id,
+              academic_year: enrollment_academic_year,
+              total_amount: Number(plan.total_amount),
+              paid_amount: 0,
+              discounted_amount: 0,
+              due_amount: Number(plan.total_amount),
+              status: 'Pending',
+              is_locked: true,
+              locked_at: DateTime.now(),
+              locked_amount: Number(plan.total_amount),
+              locked_academic_year: enrollment_academic_year,
+            },
+            { client: trx }
+          )
+        }
+      }
 
       // Commit the transaction
       await trx.commit()
@@ -490,7 +608,7 @@ export default class StundetsController {
 
     let std = await Classes.findOrFail(class_id)
 
-    if (std.school_id !== school_id || ![1, 2, 3, 4, 5, 8, 11].includes(Number(ctx.auth.user!.role_id))) {
+    if (std.school_id !== school_id || !(await Access.allows(ctx.auth.user!, 'create', 'Student', [1, 2, 3, 4, 5, 8, 11]))) {
       return ctx.response
         .status(401)
         .json({ message: 'You are not authorized to perform this action!' })
@@ -587,7 +705,7 @@ export default class StundetsController {
       if (payload.student_meta_data && Object.keys(payload.student_meta_data).length > 0) {
         if (student_meta) {
           student_meta.useTransaction(trx)
-          student_meta = await student_meta.merge(payload.student_meta_data).save()
+          student_meta = await student_meta.merge(payload.student_meta_data as any).save()
 
           if (payload.student_meta_data.admission_year !== undefined) {
             const parsedYear = parseAdmissionYear(payload.student_meta_data.admission_year)
@@ -596,6 +714,52 @@ export default class StundetsController {
               StudentEnrollment.academic_year = parsedYear
               await StudentEnrollment.save()
             }
+          }
+        }
+      }
+
+      // Handle Quota and Fee Template update if provided
+      const updatePayload = payload as any
+      const assignedQuotaId = updatePayload.quota_id ?? updatePayload.students_data?.quota_id
+      if (assignedQuotaId !== undefined) {
+        StudentEnrollment.useTransaction(trx)
+        StudentEnrollment.quota_id = assignedQuotaId ? Number(assignedQuotaId) : null
+        await StudentEnrollment.save()
+      }
+
+      const assignedFeesPlanId = updatePayload.fees_plan_id ?? updatePayload.students_data?.fees_plan_id
+      if (assignedFeesPlanId) {
+        const plan = await FeesPlan.query({ client: trx }).where('id', assignedFeesPlanId).first()
+        if (plan) {
+          let feeMaster = await StudentFeesMaster.query({ client: trx }).where('student_id', student_id).first()
+          if (feeMaster) {
+            await feeMaster.useTransaction(trx).merge({
+              fees_plan_id: plan.id,
+              total_amount: Number(plan.total_amount),
+              due_amount: Math.max(
+                0,
+                Number(plan.total_amount) - Number(feeMaster.paid_amount) - Number(feeMaster.discounted_amount)
+              ),
+              is_locked: true,
+              locked_at: DateTime.now(),
+              locked_amount: Number(plan.total_amount),
+              locked_academic_year: plan.academic_year,
+            }).save()
+          } else {
+            await StudentFeesMaster.create({
+              student_id: Number(student_id),
+              fees_plan_id: plan.id,
+              academic_year: plan.academic_year,
+              total_amount: Number(plan.total_amount),
+              paid_amount: 0,
+              discounted_amount: 0,
+              due_amount: Number(plan.total_amount),
+              status: 'Pending',
+              is_locked: true,
+              locked_at: DateTime.now(),
+              locked_amount: Number(plan.total_amount),
+              locked_academic_year: plan.academic_year,
+            }, { client: trx })
           }
         }
       }
@@ -619,9 +783,8 @@ export default class StundetsController {
     const school_id = ctx.auth.user!.school_id
     const division_id = ctx.params.division_id
     const academic_year = ctx.params.academic_year
-    const role_id = ctx.auth.user!.role_id
 
-    if (![1, 2, 3, 4, 5, 8, 11].includes(Number(role_id))) {
+    if (!(await Access.allows(ctx.auth.user!, 'create', 'Student', [1, 2, 3, 4, 5, 8, 11]))) {
       return ctx.response
         .status(401)
         .json({ message: 'You are not authorized to perform this action!' })
@@ -706,229 +869,64 @@ export default class StundetsController {
     let validatedData = []
     let errors = []
 
-    let rollColumn: 'first_year_roll_number' | 'second_year_roll_number' | 'third_year_roll_number' | 'fourth_year_roll_number' | null = null
-    const className = classRecord.class.class.toLowerCase()
-    if (className.includes('1st') || className.includes('first') || className.includes('1')) rollColumn = 'first_year_roll_number'
-    else if (className.includes('2nd') || className.includes('second') || className.includes('2')) rollColumn = 'second_year_roll_number'
-    else if (className.includes('3rd') || className.includes('third') || className.includes('3')) rollColumn = 'third_year_roll_number'
-    else if (className.includes('4th') || className.includes('fourth') || className.includes('4')) rollColumn = 'fourth_year_roll_number'
-    else rollColumn = 'first_year_roll_number' // fallback
+    // Quotas of this school by name, so the ADMISSION_QUOTA head can be matched
+    const quotaRows = await Quota.query().where('school_id', school_id as number)
+    const quotaByName = new Map(quotaRows.map((q) => [normalizeHead(q.name), q.id]))
+    const rowQuotaIds: Array<number | null> = []
+    const seenAadhar = new Map<string, number>()
+    const seenDise = new Map<string, number>()
 
-    for (const [index, data] of jsonData.entries()) {
-      let transformedData
-      if (isCollege) {
-        transformedData = {
-          students_data: {
-            first_name: data['FIRST_NAME'],
-            middle_name: data['MIDDLE_NAME'] || null,
-            last_name: data['LAST_NAME'],
-            gender: parseSafeGender(data['GENDER'] || data['Gender'] || data['gender']),
-            gr_no: parseSafeInt(data['GR No.'] || data['GR No']),
-            primary_mobile: parseSafeInt(data['MOBILE_NO1']) || 9999999999,
-            school_id: school_id as number,
-            is_active: true,
-            first_name_in_guj: data['S.LANGUAGE_FIRST_NAME'] || null,
-            middle_name_in_guj: data['S.LANGUAGE_MIDDLE_NAME'] || null,
-            last_name_in_guj: data['S.LANGUAGE_LAST_NAME'] || null,
-            birth_date: parseAndFormatDate(data['DATE_OF_BIRTH']),
-            [rollColumn]: parseSafeInt(data['ROLL_NO']),
-            father_name: data['FATHER_NAME'] || null,
-            father_name_in_guj: data['S.LANGUAGE_Father Name'] || null,
-            mother_name: data['MOTHER_NAME'] || null,
-            mother_name_in_guj: data['S.LANGUAGE_Mother Name'] || null,
-            aadhar_no: parseSafeAadhar(data['STUDENT_AADHAAR_CARDNO']),
-            enrollment_code: data['STUDENT_CODE'] || data['Enrollment Code'] || null,
-            student_type: 'COLLEGE' as const,
-          },
-          student_meta_data: {
-            // Core fields
-            aadhar_dise_no: parseSafeInt(data['STUDENT_U_DIESNO'] || data['DISE Number']),
-            birth_place: data['BIRTH PLACE'] || null,
-            birth_place_in_guj: data['Birth Place In Gujarati'] || null,
-            religion: data['RELIGION'] || null,
-            religion_in_guj: data['Religion In Gujarati'] || null,
-            caste: data['CASTE'] || data['Caste'] || null,
-            caste_in_guj: data['Caste In Gujarati'] || null,
-            category: parseSafeCategory(data['CATEGORY'] || data['Category']),
-            admission_date: parseAndFormatDate(data['ADMISSION_DATE']),
-            secondary_mobile: parseSafeInt(data['MOBILE_NO2']),
-            privious_school: data['PREVIOUS_SCHOOL_NAME'] || null,
-            address: data['CURRENT ADDRESS'] || null,
-            district: data['Birth District'] || null,
-
-            // New Address Details
-            current_area: data['Current Area'] || null,
-            city: data['Current CITY'] || null,
-            state: data['Current STATE'] || null,
-            postal_code: data['Currrent PIN_CODE'] || null,
-            current_country: data['Current COUNTRY'] || null,
-            permanent_address: data['PERMANENT ADDRESS'] || null,
-            permanent_area: data['Permanent Area'] || null,
-            permanent_city: data['Permanent City'] || null,
-            permanent_state: data['Permanent STATE'] || null,
-            permanent_pincode: data['Permanent PIN_CODE'] || null,
-            permanent_country: data['Permanent COUNTRY'] || null,
-            country_code: data['COUNTRY_CODE'] || null,
-            nationality: data['NATIONALITY'] || null,
-            student_code: data['STUDENT_CODE'] || null,
-
-            // Academic/Admission
-            admission_standard: data['ADMISSION_STANDARD'] || null,
-            subject_group: data['SUBJECT_GROUP'] || null,
-            birth_taluka: data['Birth Taluka'] || null,
-            birth_district: data['Birth District'] || null,
-            student_leaving_reason: data['STUDENT_LEAVING_REASON'] || null,
-            student_lc_date: parseAndFormatDate(data['STUDENT_LC_DATE']),
-            student_lc_no: data['STUDENT_LC_NO'] || null,
-            pen: data['PEN'] || null,
-            abha_card_no: data['AbhaCardNo'] || null,
-            school_udise_no: data['School UDISE No'] || null,
-
-            // Family & Contact
-            email_id: data['EMAIL_ID'] || null,
-            website: data['WEBSITE'] || null,
-            mother_tongue: data['MOTHER_TOUNG'] || null,
-
-            // Father Details
-            father_qualification: data['FATHER_QUALIFICATION'] || null,
-            father_occupation: data['FATHER_OCCUPATION'] || null,
-            father_email: data['FATHER_EMAIL'] || null,
-            father_organisation: data['FATHER_ORGANISATION'] || null,
-            father_office_address: data['FATHER_OFFICE_ADDRESS1'] || null,
-            father_office_phone: data['FATHER_OFFICE_PHONENO'] || null,
-            father_mobile: data['FATHER_MOBILENO'] ? String(data['FATHER_MOBILENO']) : null,
-
-            // Mother Details
-            mother_qualification: data['MOTHER_QUALIFICATION'] || null,
-            mother_occupation: data['MOTHER_OCCUPATION'] || null,
-            mother_email: data['MOTHER_EMAIL'] || null,
-            mother_organisation: data['MOTHER_ORGANISATION'] || null,
-            mother_office_address: data['MOTHER_OFFICE_ADDRESS1'] || null,
-            mother_office_phone: data['MOTHER_OFFICE_PHONENO'] || null,
-            mother_mobile: data['MOTHER_MOBILENO'] ? String(data['MOTHER_MOBILENO']) : null,
-
-            // Guardian Details
-            guardian_name: data['GARDIAN_NAME'] || null,
-            guardian_qualification: data['GARDIAN_QUALIFICATION'] || null,
-            guardian_occupation: data['GARDIAN_OCCUPATION'] || null,
-            guardian_email: data['GARDIAN_EMAIL'] || null,
-            guardian_organisation: data['GARDIAN_ORGANISATION'] || null,
-            guardian_office_address: data['GARDIAN_OFFICE_ADDRESS1'] || null,
-            guardian_office_phone: data['GARDIAN_OFFICE_PHONENO'] || null,
-            guardian_mobile: data['GARDIAN_MOBILENO'] ? String(data['GARDIAN_MOBILENO']) : null,
-            guardian_relation: data['Relation with Local Guardian'] || null,
-
-            // Academic History
-            ssc_passing_year: data['S.S.C. Passing Year'] || null,
-            hsc_passing_year: data['H.S.C. Passing Year'] || null,
-            hsc_attempts: parseSafeInt(data['How Many Attempt?']),
-            hsc_obtained_marks: parseSafeFloat(data['H.S.C. Obtained Marks']),
-            hsc_pcb_marks_with_practical: parseSafeFloat(data['H.S.C. PCB Marks with Practical']),
-
-            // NEET
-            entrance_exam_name: data['Name of Entrance Exam'] || null,
-            neet_score: parseSafeFloat(data['NEET score']),
-            neet_roll_no: data['NEET Roll No.'] || null,
-            neet_application_number: data['NEET Application Number'] || null,
-            neet_all_india_rank: parseSafeInt(data['NEET All India Rank']),
-            neet_percentile: data['NEET Percentile (%)'] || null,
-            general_merit: parseSafeInt(data['General Merit']),
-            category_merit: parseSafeInt(data['Category Merit']),
-
-            // Internship
-            internship_provisional_number: data['Internship Provisional Number'] || null,
-            internship_provisional_date: parseAndFormatDate(data['Internship Provisional Date']),
-            internship_starting_date: parseAndFormatDate(data['Internship Starting Date']),
-            internship_completion_date: parseAndFormatDate(data['Internship Completion Date']),
-
-            // Progress
-            first_year_attempt: parseSafeInt(data['1st year Attempt']),
-            second_year_attempt: parseSafeInt(data['2nd Year Attempt']),
-            third_year_attempt: parseSafeInt(data['3rd Year Attempt']),
-            fourth_year_attempt: parseSafeInt(data['4th year Attempt']),
-            final_bhms_passing_date: parseAndFormatDate(data['Final BHMS Date of Passing']),
-
-            // Administrative
-            ayush_id: data['Ayush ID'] || null,
-            abc_id: data['ABC ID'] || null,
-            admission_cancel:
-              data['Admission Cancel']?.toString().toLowerCase() === 'true' ||
-              data['Admission Cancel']?.toString().toLowerCase() === 'yes',
-            admission_cancel_year: data['Admission Cancel Year'] || null,
-            admission_cancel_date: parseAndFormatDate(data['Admission Cancel Date']),
-            admission_transfer:
-              data['Admission Transfer']?.toString().toLowerCase() === 'true' ||
-              data['Admission Transfer']?.toString().toLowerCase() === 'yes',
-            admission_transfer_date: parseAndFormatDate(data['Admission Transfer Date']),
-            admission_transfer_to_college: data['Admission transfer to College'] || null,
-            admission_transfer_from_college: data['Admission Transfer From College'] || null,
-
-            // Additional legacy fields if needed
-            blood_group: parseSafeBloodGroup(data['BLOOD_GROUP']),
-            bank_name: data['Bank_Name'] || null,
-            account_no: parseSafeInt(data['Bank_Account_Number']),
-            IFSC_code: data['IFSC_Code'] || null,
-            
-            // New fields from 22-12-2025 format
-            admission_year: data['Admission Year'] || null,
-            sub_caste: data['Sub Caste'] || null,
-            quota_fees: data['Quota Fees'] || null,
-            activity_house: data['ACTIVITY_HOUSE'] || null,
-            bank_branch_name: data['Bank_Branch_Name'] || null,
-          },
-        }
-      } else {
-        transformedData = {
-          students_data: {
-            first_name: data['First Name'],
-            middle_name: data['Middle Name'] || null,
-            last_name: data['Last Name'],
-            gender: parseSafeGender(data['Gender'] || data['GENDER'] || data['gender']),
-            gr_no: parseSafeInt(data['GR No']),
-            primary_mobile: parseSafeInt(data['Mobile No']) || 9999999999,
-            school_id: school_id as number,
-            is_active: true,
-            first_name_in_guj: data['First Name Gujarati'] || null,
-            middle_name_in_guj: data['Middle Name Gujarati'] || null,
-            last_name_in_guj: data['Last Name Gujarati'] || null,
-            birth_date: parseAndFormatDate(data['Date of Birth']),
-            [rollColumn]: parseSafeInt(data['Roll Number']),
-            father_name: data['Father Name'] || null,
-            father_name_in_guj: data['Father Name in Gujarati'] || null,
-            mother_name: data['Mother Name'] || null,
-            mother_name_in_guj: data['Mother Name in Gujarati'] || null,
-            aadhar_no: parseSafeAadhar(data['Aadhar No']),
-            enrollment_code: data['Enrollment Code'] || data['STUDENT_CODE'] || null,
-            student_type: 'SCHOOL' as const,
-          },
-          student_meta_data: {
-            aadhar_dise_no: parseSafeInt(data['DISE Number']),
-            birth_place: data['Birth Place'] || null,
-            birth_place_in_guj: data['Birth Place In Gujarati'] || null,
-            religion: data['Religion'] || null,
-            religion_in_guj: data['Religion In Gujarati'] || null,
-            caste: data['Caste'] || null,
-            caste_in_guj: data['Caste In Gujarati'] || null,
-            category: parseSafeCategory(data['Category'] || data['CATEGORY']),
-            admission_date: parseAndFormatDate(data['Admission Date']),
-            admission_class_id: null,
-            secondary_mobile: parseSafeInt(data['Other Mobile No']),
-            privious_school: data['Previous School'] || null,
-            privious_school_in_guj: data['Previous School In Gujarati'] || null,
-            address: data['Address'] || null,
-            district: data['District'] || null,
-            city: data['City'] || null,
-            state: data['State'] || null,
-            postal_code: data['Postal Code'] || null,
-            bank_name: data['Bank Name'] || null,
-            account_no: parseSafeInt(data['Account Number']),
-            IFSC_code: data['IFSC Code'] || null,
-          },
+    for (const [index, rawRow] of jsonData.entries()) {
+      const data = readSheetRow(rawRow)
+      const students_data: Record<string, any> = {
+        school_id: school_id as number,
+        is_active: true,
+        student_type: isCollege ? 'COLLEGE' : 'SCHOOL',
+      }
+      const student_meta_data: Record<string, any> = {}
+      for (const col of STUDENT_COLUMNS) {
+        if (col.table === 'derived') continue
+        const target = col.table === 'students' ? students_data : student_meta_data
+        target[col.key] = parseSheetValue(data[col.key], col.kind)
+      }
+      if (typeof data.category_merit === 'string') {
+        const rank = data.category_merit.match(/(\d+)/)
+        student_meta_data.category_merit = rank ? Number(rank[1]) : null
+      }
+      students_data.first_name = students_data.first_name || 'Student'
+      students_data.last_name = students_data.last_name || ''
+      students_data.primary_mobile = students_data.primary_mobile || 9999999999
+      // Excel shows long numbers as 5.15293E+11 and keeps only those digits: the real number is gone, so refuse it
+      const rowProblems: { field: string; message: string }[] = []
+      for (const col of STUDENT_COLUMNS) {
+        const cell = data[col.key]
+        if (col.table !== 'derived' && typeof cell === 'string' && SCIENTIFIC_NOTATION.test(cell.trim())) {
+          rowProblems.push({ field: col.header, message: `"${cell.trim()}" is in scientific notation, so its digits are lost. Format the column as Text in Excel and enter the full number.` })
         }
       }
+      // the same Aadhaar / U-DISE number cannot belong to two students
+      for (const [key, seen, head] of [
+        ['aadhar_no', seenAadhar, 'STUDENT_AADHAAR_CARDNO'],
+        ['aadhar_dise_no', seenDise, 'STUDENT_U_DIESNO'],
+      ] as const) {
+        const value = (key === 'aadhar_no' ? students_data : student_meta_data)[key]
+        if (value !== null && value !== undefined) {
+          const earlier = seen.get(String(value))
+          if (earlier !== undefined) rowProblems.push({ field: head, message: `${value} is already used by row ${earlier}` })
+          else seen.set(String(value), index + 1)
+        }
+      }
+      if (rowProblems.length) {
+        errors.push({ row: index + 1, message: rowProblems.map((p) => `${p.field}: ${p.message}`).join('; '), errors: rowProblems })
+        continue
+      }
+
+      const transformedData = { students_data, student_meta_data }
+      const quotaId = data.admission_quota ? quotaByName.get(normalizeHead(data.admission_quota)) ?? null : null
       try {
         const payload = await CreateValidatorForUpload.validate(transformedData)
         validatedData.push(payload)
+        rowQuotaIds.push(quotaId)
       } catch (validationError) {
         errors.push({
           row: index + 1,
@@ -943,7 +941,7 @@ export default class StundetsController {
     // Start transaction after validation
     const trx = await db.transaction()
     try {
-      for (const validated_student of validatedData) {
+      for (const [validatedIndex, validated_student] of validatedData.entries()) {
         const student_data = await Students.create(
           {
             ...validated_student.students_data,
@@ -972,6 +970,7 @@ export default class StundetsController {
             academic_year: enrollment_academic_year,
             status: 'pursuing',
             is_new_admission: false,
+            quota_id: rowQuotaIds[validatedIndex] ?? null,
           },
           { client: trx }
         )
@@ -985,6 +984,20 @@ export default class StundetsController {
     } catch (error) {
       await trx.rollback()
       console.error('[BulkUpload ERROR]', error)
+      if (error.code === 'ER_DUP_ENTRY') {
+        const key = String(error.sqlMessage || '')
+        const head = key.includes('aadhar_dise_no')
+          ? 'STUDENT_U_DIESNO'
+          : key.includes('aadhar_no')
+            ? 'STUDENT_AADHAAR_CARDNO'
+            : key.includes('account_no')
+              ? 'Bank_Account_Number'
+              : key.includes('enrollment_code')
+                ? 'Enrollment number'
+                : 'a unique field'
+        const message = `Nothing was saved: a student in the file has the same ${head} as a student that already exists. Remove or correct that value and upload again.`
+        return ctx.response.status(400).json({ message, errors: [{ row: 0, message, errors: [{ field: head, message }] }] })
+      }
       return ctx.response
         .status(500)
         .json({ message: 'Internal server error', error: error.message, code: error.code, sqlMessage: error.sqlMessage })
@@ -1042,6 +1055,7 @@ export default class StundetsController {
       class_students = await StudentEnrollments.query()
         .whereIn('division_id', divisionIds)
         .andWhere('academic_year', academic_year as number)
+        .preload('quota')
         .preload('student', (studentQuery) => {
           studentQuery.preload('student_meta')
         })
@@ -1050,6 +1064,7 @@ export default class StundetsController {
       class_students = await StudentEnrollments.query()
         .where('division_id', division_id)
         .andWhere('academic_year', academic_year as number)
+        .preload('quota')
         .preload('student', (studentQuery) => {
           studentQuery.preload('student_meta')
         })
@@ -1067,7 +1082,8 @@ export default class StundetsController {
       return { 
         ...enrollment.student.serialize(), 
         ...(studentMeta ? studentMeta.serialize() : {}),
-        _division_id: enrollment.division_id 
+        _division_id: enrollment.division_id,
+        _quota_name: enrollment.quota?.name ?? ''
       }
     })
 
@@ -1076,7 +1092,9 @@ export default class StundetsController {
     const worksheet = workbook.addWorksheet('Class Data')
 
     // Prepare Headers
-    const headers = ['class', 'division', ...fields.students, ...fields.student_meta]
+    // Only the heads of the final student sheet can be exported, in sheet order
+    const requested = new Set<string>([...(fields.students || []), ...(fields.student_meta || [])])
+    const headers = STUDENT_COLUMNS.map((col) => col.key).filter((key) => requested.has(key))
     worksheet.addRow(headers)
 
     const dateFields = [
@@ -1117,6 +1135,9 @@ export default class StundetsController {
       'internship_provisional_number',
       'postal_code',
       'permanent_pincode',
+      'university_spid_no',
+      'roll_no_internship',
+      'bank_branch_pincode',
     ]
 
     const formatStudentDate = (val: any): string => {
@@ -1154,7 +1175,10 @@ export default class StundetsController {
       const currentDiv = divisionsMap.get(data._division_id)
       const rowValues = headers.map((header: string) => {
         if (header === 'class') return currentDiv?.class?.class || division.class.class
-        if (header === 'division') return currentDiv?.division || ''
+        if (header === 'full_name') {
+          return [data.first_name, data.middle_name, data.last_name].filter(Boolean).join(' ')
+        }
+        if (header === 'admission_quota') return data.admission_quota || data._quota_name || ''
         
         const rawVal = (data as Record<string, any>)[header]
         if (rawVal === null || rawVal === undefined || rawVal === '') return ''
@@ -1177,13 +1201,22 @@ export default class StundetsController {
     })
 
     // Generate File Buffer
-    const buffer = await workbook.xlsx.writeBuffer()
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer())
 
     // Generate unique value for the file name
     const uniqueValue = new Date().getTime()
     const filename = export_all_divisions
       ? `class_${division.class.class}_all_divisions_data_${uniqueValue}.xlsx`
       : `class_${division.class.class}-${division.division}_data_${uniqueValue}.xlsx`
+
+    // Upload to DigitalOcean Spaces
+    try {
+      const uploadResult = await SpacesService.uploadExport('students', filename, buffer)
+      ctx.response.header('x-cloud-url', uploadResult.url)
+      ctx.response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+    } catch (e) {
+      console.error('[StudentController] Failed to upload export to Spaces:', e)
+    }
 
     // Send Excel File as Response
     ctx.response.header(

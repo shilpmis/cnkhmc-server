@@ -20,6 +20,7 @@ export default class RoleMaster extends Base {
       | 'ORG_ADMIN'
       | 'SUPER_ADMIN'
       | 'DEVELOPER'
+      | 'STAFF'
 
     @column()
     declare permissions : any

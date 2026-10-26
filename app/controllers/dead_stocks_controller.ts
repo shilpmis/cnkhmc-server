@@ -10,8 +10,26 @@ import path from 'node:path'
 import fs from 'node:fs'
 
 export default class DeadStocksController {
-  async index({ response }: HttpContext) {
-    const stocks = await DeadStock.query().orderBy('created_at', 'desc')
+  async index({ request, response }: HttpContext) {
+    const departmentId = request.input('department_id')
+
+    const query = DeadStock.query()
+      .orderBy('created_at', 'desc')
+      .preload('transactions', (tQuery) => {
+        tQuery.preload('department').orderBy('transaction_date', 'desc')
+      })
+
+    if (departmentId && departmentId !== 'ALL') {
+      if (departmentId === 'STORE') {
+        query.where('available_quantity', '>', 0)
+      } else {
+        query.whereHas('transactions', (tQuery) => {
+          tQuery.where('department_id', departmentId)
+        })
+      }
+    }
+
+    const stocks = await query
     return response.ok({ data: stocks })
   }
 

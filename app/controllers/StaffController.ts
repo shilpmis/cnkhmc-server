@@ -1,4 +1,5 @@
 import { DateTime } from 'luxon'
+import KavachaColumns from '#services/kavacha_columns'
 import type { HttpContext } from '@adonisjs/core/http'
 import Staff from '#models/Staff'
 import { CreateValidatorForStaff, UpdateValidatorForStaff, CreateValidatorForBulkUpload } from '#validators/Staff'
@@ -15,6 +16,7 @@ import User from '#models/User'
 import LeavePolicies from '#models/LeavePolicies'
 import StaffLeaveBalance from '#models/StaffLeaveBalance'
 import StaffLetter from '#models/StaffLetter'
+import SpacesService from '#services/SpacesService'
 
 export default class StaffController {
   /**
@@ -95,7 +97,6 @@ export default class StaffController {
       } else if (type === 'non-activeuser') {
         const onBoardedUser = await User.query()
           .where('school_id', school_id)
-          .andWhere('role_id', 6)
           .andWhereNotNull('staff_id')
 
         const onboardedStaffIds = onBoardedUser.map((user) => Number(user.staff_id))
@@ -104,14 +105,29 @@ export default class StaffController {
           .leftJoin('staff_enrollments as se', 'staff.id', 'se.staff_id')
           .leftJoin('staff_role_master as sm', 'staff.staff_role_id', 'sm.id')
           .whereNotIn('staff.id', onboardedStaffIds)
-          .select([
-            'staff.*',
-            'se.id as staff_enrollment_id',
-            'se.status',
-            'se.academic_year as enrollment_academic_year',
-            'sm.role as role',
-            'sm.working_hours',
-          ])
+
+        const staff_category = ctx.request.input('staff_category') || ctx.request.input('staff_type')
+        if (staff_category === 'teaching') {
+          staffQuery.where('sm.is_teaching_role', 1)
+        } else if (staff_category === 'hospital') {
+          staffQuery.where('staff.staff_type', 'Hospital Staff')
+        } else if (staff_category === 'other' || staff_category === 'non-teaching') {
+          staffQuery
+            .where('sm.is_teaching_role', 0)
+            .where((q) => {
+              q.whereNull('staff.staff_type').orWhereNot('staff.staff_type', 'Hospital Staff')
+            })
+        }
+
+        staffQuery.select([
+          'staff.*',
+          'se.id as staff_enrollment_id',
+          'se.status',
+          'se.academic_year as enrollment_academic_year',
+          'sm.role as role',
+          'sm.is_teaching_role as is_teaching_role',
+          'sm.working_hours',
+        ])
       } else {
         staffQuery
           .leftJoin('staff_enrollments as se', 'staff.id', 'se.staff_id')
@@ -1558,7 +1574,7 @@ export default class StaffController {
             staff = await Staff.query()
               .useTransaction(trx)
               .where('school_id', school_id as number)
-              .andWhere('aadhar_no', staffPayload.aadhar_no)
+              .andWhere('aadhar_no_bidx', KavachaColumns.lookup('staff', 'aadhar_no', staffPayload.aadhar_no))
               .first()
           }
 
@@ -1566,7 +1582,7 @@ export default class StaffController {
             staff = await Staff.query()
               .useTransaction(trx)
               .where('school_id', school_id as number)
-              .andWhere('pan_card_no', staffPayload.pan_card_no)
+              .andWhere('pan_card_no_bidx', KavachaColumns.lookup('staff', 'pan_card_no', staffPayload.pan_card_no))
               .first()
           }
 
@@ -1574,7 +1590,7 @@ export default class StaffController {
             staff = await Staff.query()
               .useTransaction(trx)
               .where('school_id', school_id as number)
-              .andWhere('account_no', staffPayload.account_no)
+              .andWhere('account_no_bidx', KavachaColumns.lookup('staff', 'account_no', staffPayload.account_no))
               .first()
           }
 
@@ -1582,7 +1598,7 @@ export default class StaffController {
             staff = await Staff.query()
               .useTransaction(trx)
               .where('school_id', school_id as number)
-              .andWhere('epf_uan_no', staffPayload.epf_uan_no)
+              .andWhere('epf_uan_no_bidx', KavachaColumns.lookup('staff', 'epf_uan_no', staffPayload.epf_uan_no))
               .first()
           }
 
@@ -1623,7 +1639,7 @@ export default class StaffController {
             }
           }
           if (staffFields.pan_card_no) {
-            const otherWithPan = await Staff.query().useTransaction(trx).where('pan_card_no', staffFields.pan_card_no).where('id', '!=', currentStaffId).first()
+            const otherWithPan = await Staff.query().useTransaction(trx).where('pan_card_no_bidx', KavachaColumns.lookup('staff', 'pan_card_no', staffFields.pan_card_no)).where('id', '!=', currentStaffId).first()
             if (otherWithPan && !staff) {
               staff = otherWithPan
             } else if (otherWithPan && staff && staff.id !== otherWithPan.id) {
@@ -1631,7 +1647,7 @@ export default class StaffController {
             }
           }
           if (staffFields.aadhar_no) {
-            const otherWithAadhar = await Staff.query().useTransaction(trx).where('aadhar_no', staffFields.aadhar_no).where('id', '!=', currentStaffId).first()
+            const otherWithAadhar = await Staff.query().useTransaction(trx).where('aadhar_no_bidx', KavachaColumns.lookup('staff', 'aadhar_no', staffFields.aadhar_no)).where('id', '!=', currentStaffId).first()
             if (otherWithAadhar && !staff) {
               staff = otherWithAadhar
             } else if (otherWithAadhar && staff && staff.id !== otherWithAadhar.id) {
@@ -1639,7 +1655,7 @@ export default class StaffController {
             }
           }
           if (staffFields.account_no) {
-            const otherWithAcc = await Staff.query().useTransaction(trx).where('account_no', staffFields.account_no).where('id', '!=', currentStaffId).first()
+            const otherWithAcc = await Staff.query().useTransaction(trx).where('account_no_bidx', KavachaColumns.lookup('staff', 'account_no', staffFields.account_no)).where('id', '!=', currentStaffId).first()
             if (otherWithAcc && !staff) {
               staff = otherWithAcc
             } else if (otherWithAcc && staff && staff.id !== otherWithAcc.id) {
@@ -1653,7 +1669,7 @@ export default class StaffController {
             }
           }
           if (staffFields.epf_uan_no) {
-            const otherWithUan = await Staff.query().useTransaction(trx).where('epf_uan_no', staffFields.epf_uan_no).where('id', '!=', currentStaffId).first()
+            const otherWithUan = await Staff.query().useTransaction(trx).where('epf_uan_no_bidx', KavachaColumns.lookup('staff', 'epf_uan_no', staffFields.epf_uan_no)).where('id', '!=', currentStaffId).first()
             if (otherWithUan && staff && staff.id !== otherWithUan.id) {
               staffFields.epf_uan_no = null
             }
@@ -1786,6 +1802,25 @@ export default class StaffController {
         return ctx.response.badRequest({ error: 'No staff found matching the criteria' })
       }
 
+      // Fetch all staff letters for the retrieved staff members (ordered by date ascending, then id)
+      const staffIds = Array.from(new Set(staff.map((s) => Number(s.id)).filter((id) => !isNaN(id) && id > 0)))
+      const allStaffLetters = staffIds.length > 0 
+        ? await db
+            .from('staff_letters as sl')
+            .leftJoin('staff_configurations as sc', 'sl.letter_type_id', 'sc.id')
+            .whereIn('sl.staff_id', staffIds)
+            .select(['sl.*', 'sc.name as config_letter_type'])
+            .orderBy('sl.letter_date', 'asc')
+            .orderBy('sl.id', 'asc')
+        : []
+      const lettersByStaff = new Map<string, any[]>()
+      allStaffLetters.forEach((l) => {
+        const key = String(l.staff_id)
+        const list = lettersByStaff.get(key) || []
+        list.push(l)
+        lettersByStaff.set(key, list)
+      })
+
       // Get all staff roles from this school without academic session filter
       const roleQuery = StaffMaster.query()
         .where('school_id', school_id)
@@ -1809,8 +1844,32 @@ export default class StaffController {
       const workbook = new ExcelJS.Workbook()
       const worksheet = workbook.addWorksheet('Staff Data')
 
-      // Add headers
-      worksheet.addRow(fields)
+      // Set column widths based on content type
+      worksheet.columns = fields.map((header: string) => {
+        let width = 20
+        if (
+          header === 'university_approval_details' ||
+          header === 'uni_approval_details' ||
+          header === 'staff_letters_details' ||
+          header === 'all_letters_details' ||
+          header === 'university_appointment_details' ||
+          header === 'uni_approval_remarks' ||
+          header === 'university_approval_remarks' ||
+          header === 'university_appointment_remarks' ||
+          header === 'address' ||
+          header === 'permanent_address'
+        ) {
+          width = 45
+        } else if (header === 'email' || header === 'department' || header === 'qualification') {
+          width = 25
+        }
+        return { key: header, width }
+      })
+
+      // Add headers with bold font
+      const headerRow = worksheet.addRow(fields)
+      headerRow.font = { bold: true }
+      headerRow.alignment = { vertical: 'middle' }
 
       // Add data rows
       const dateFields = [
@@ -1857,9 +1916,154 @@ export default class StaffController {
         'voter_id_no',
         'driving_licence',
         'driving_license_no',
+        'university_approval_details',
+        'uni_approval_details',
+        'staff_letters_details',
+        'all_letters_details',
+        'university_appointment_details',
+        'uni_approval_number',
+        'university_approval_letter_no',
+        'university_appointment_letter_no',
+        'uni_approval_remarks',
+        'university_approval_remarks',
+        'university_appointment_remarks',
       ]
 
       staff.forEach((data) => {
+        const staffLetters = lettersByStaff.get(String(data.id)) || []
+
+        const formatDateVal = (val: any): string => {
+          if (!val) return ''
+          if (val instanceof Date) {
+            const y = val.getUTCFullYear()
+            const m = String(val.getUTCMonth() + 1).padStart(2, '0')
+            const d = String(val.getUTCDate()).padStart(2, '0')
+            return `${y}-${m}-${d}`
+          }
+          const dObj = new Date(val)
+          if (!isNaN(dObj.getTime())) {
+            const y = dObj.getFullYear()
+            const m = String(dObj.getMonth() + 1).padStart(2, '0')
+            const d = String(dObj.getDate()).padStart(2, '0')
+            return `${y}-${m}-${d}`
+          }
+          return String(val).trim()
+        }
+
+        // Approvals (matches letter_type including 'approval' or 'manjuri' or 'મંજૂરી')
+        const approvalItems: { letter_type: string; letter_no: string; letter_date: string; remarks: string }[] = []
+        const seenApprovalKeys = new Set<string>()
+
+        staffLetters.forEach((l) => {
+          const type = (l.letter_type || l.config_letter_type || '').trim()
+          const typeLower = type.toLowerCase()
+          const isAppr =
+            typeLower.includes('approval') ||
+            typeLower.includes('approv') ||
+            typeLower.includes('manjuri') ||
+            type.includes('મંજૂરી') ||
+            type.includes('માન્યતા')
+
+          if (isAppr) {
+            const no = (l.letter_no || '').trim()
+            const dt = formatDateVal(l.letter_date)
+            const rem = (l.remarks || '').trim()
+            if (no || dt || rem || type) {
+              seenApprovalKeys.add(`${no}|${dt}`)
+              approvalItems.push({
+                letter_type: type || 'University Approval Letter',
+                letter_no: no,
+                letter_date: dt,
+                remarks: rem,
+              })
+            }
+          }
+        })
+
+        const legacyApprNo = String(data.uni_approval_number || data.uni_approval_no || data.university_approval_letter_no || '').trim()
+        const legacyApprDt = formatDateVal(data.uni_approval_date || data.university_approval_date)
+        if ((legacyApprNo || legacyApprDt) && !seenApprovalKeys.has(`${legacyApprNo}|${legacyApprDt}`)) {
+          approvalItems.push({
+            letter_type: 'University Approval Letter',
+            letter_no: legacyApprNo,
+            letter_date: legacyApprDt,
+            remarks: '',
+          })
+        }
+
+        // Appointments (matches letter_type including 'appointment')
+        const appointmentItems: { letter_type: string; letter_no: string; letter_date: string; remarks: string }[] = []
+        const seenApptKeys = new Set<string>()
+
+        staffLetters.forEach((l) => {
+          const type = (l.letter_type || l.config_letter_type || '').trim()
+          const typeLower = type.toLowerCase()
+          const isAppt = typeLower.includes('appointment') || typeLower.includes('appoint')
+
+          if (isAppt) {
+            const no = (l.letter_no || '').trim()
+            const dt = formatDateVal(l.letter_date)
+            const rem = (l.remarks || '').trim()
+            if (no || dt || rem || type) {
+              seenApptKeys.add(`${no}|${dt}`)
+              appointmentItems.push({
+                letter_type: type || 'University Appointment Letter',
+                letter_no: no,
+                letter_date: dt,
+                remarks: rem,
+              })
+            }
+          }
+        })
+
+        const legacyApptNo = String(data.university_appointment_letter_no || '').trim()
+        const legacyApptDt = formatDateVal(data.university_appointment_date)
+        if ((legacyApptNo || legacyApptDt) && !seenApptKeys.has(`${legacyApptNo}|${legacyApptDt}`)) {
+          appointmentItems.push({
+            letter_type: 'University Appointment Letter',
+            letter_no: legacyApptNo,
+            letter_date: legacyApptDt,
+            remarks: '',
+          })
+        }
+
+        // All Letters combined (Approval, Appointment, PG Recognition, Promotion, etc.)
+        const allLetterItems: { letter_type: string; letter_no: string; letter_date: string; remarks: string }[] = []
+        const seenAllKeys = new Set<string>()
+
+        staffLetters.forEach((l) => {
+          const type = (l.letter_type || l.config_letter_type || 'Staff Letter').trim()
+          const no = (l.letter_no || '').trim()
+          const dt = formatDateVal(l.letter_date)
+          const rem = (l.remarks || '').trim()
+          if (type || no || dt || rem) {
+            seenAllKeys.add(`${type}|${no}|${dt}`)
+            allLetterItems.push({
+              letter_type: type,
+              letter_no: no,
+              letter_date: dt,
+              remarks: rem,
+            })
+          }
+        })
+
+        if ((legacyApptNo || legacyApptDt) && !seenAllKeys.has(`University Appointment Letter|${legacyApptNo}|${legacyApptDt}`)) {
+          allLetterItems.push({
+            letter_type: 'University Appointment Letter',
+            letter_no: legacyApptNo,
+            letter_date: legacyApptDt,
+            remarks: '',
+          })
+        }
+        if ((legacyApprNo || legacyApprDt) && !seenAllKeys.has(`University Approval Letter|${legacyApprNo}|${legacyApprDt}`)) {
+          allLetterItems.push({
+            letter_type: 'University Approval Letter',
+            letter_no: legacyApprNo,
+            letter_date: legacyApprDt,
+            remarks: '',
+          })
+        }
+
         const rowValues = fields.map((header: string) => {
           if (header === 'staff_role') {
             const role = staffRoles.find((role) => role.id === data.staff_role_id)
@@ -1874,12 +2078,127 @@ export default class StaffController {
           if (header === 'ayush_registration_no') {
             return data.ayush_registration_no || data.ayush_id_no || ''
           }
-          if (header === 'uni_approval_number') {
-            return data.uni_approval_number || data.uni_approval_no || data.university_approval_letter_no || ''
+
+          // Option 2: University approvals formatted in paired multi-line format with remarks
+          if (header === 'university_approval_details' || header === 'uni_approval_details') {
+            if (approvalItems.length === 0) return ''
+            if (approvalItems.length === 1) {
+              const item = approvalItems[0]
+              const parts: string[] = []
+              if (item.letter_no) parts.push(`No: ${item.letter_no}`)
+              if (item.letter_date) parts.push(`Date: ${item.letter_date}`)
+              if (item.remarks) parts.push(`Remarks: ${item.remarks}`)
+              return parts.length > 0 ? parts.join(' | ') : item.letter_no || ''
+            }
+            return approvalItems
+              .map((item, idx) => {
+                const parts: string[] = []
+                if (item.letter_no) parts.push(`No: ${item.letter_no}`)
+                if (item.letter_date) parts.push(`Date: ${item.letter_date}`)
+                if (item.remarks) parts.push(`Remarks: ${item.remarks}`)
+                return `${idx + 1}. ${parts.join(' | ')}`
+              })
+              .join('\r\n')
           }
-          if (header === 'uni_approval_date') {
-            return data.uni_approval_date || data.university_approval_date || ''
+
+          // Option 2: All staff letters formatted in paired multi-line format
+          if (header === 'staff_letters_details' || header === 'all_letters_details') {
+            if (allLetterItems.length === 0) return ''
+            if (allLetterItems.length === 1) {
+              const item = allLetterItems[0]
+              const parts: string[] = []
+              if (item.letter_no) parts.push(`No: ${item.letter_no}`)
+              if (item.letter_date) parts.push(`Date: ${item.letter_date}`)
+              if (item.remarks) parts.push(`Remarks: ${item.remarks}`)
+              return `[${item.letter_type}] ${parts.join(' | ')}`
+            }
+            return allLetterItems
+              .map((item, idx) => {
+                const parts: string[] = []
+                if (item.letter_no) parts.push(`No: ${item.letter_no}`)
+                if (item.letter_date) parts.push(`Date: ${item.letter_date}`)
+                if (item.remarks) parts.push(`Remarks: ${item.remarks}`)
+                return `${idx + 1}. [${item.letter_type}] ${parts.join(' | ')}`
+              })
+              .join('\r\n')
           }
+
+          // Option 2: University appointment formatted in paired multi-line format
+          if (header === 'university_appointment_details') {
+            if (appointmentItems.length === 0) return ''
+            if (appointmentItems.length === 1) {
+              const item = appointmentItems[0]
+              const parts: string[] = []
+              if (item.letter_no) parts.push(`No: ${item.letter_no}`)
+              if (item.letter_date) parts.push(`Date: ${item.letter_date}`)
+              if (item.remarks) parts.push(`Remarks: ${item.remarks}`)
+              return parts.length > 0 ? parts.join(' | ') : item.letter_no || ''
+            }
+            return appointmentItems
+              .map((item, idx) => {
+                const parts: string[] = []
+                if (item.letter_no) parts.push(`No: ${item.letter_no}`)
+                if (item.letter_date) parts.push(`Date: ${item.letter_date}`)
+                if (item.remarks) parts.push(`Remarks: ${item.remarks}`)
+                return `${idx + 1}. ${parts.join(' | ')}`
+              })
+              .join('\r\n')
+          }
+
+          // Approval letter numbers (aligned line-by-line if multiple)
+          if (header === 'uni_approval_number' || header === 'university_approval_letter_no') {
+            if (approvalItems.length === 0) return ''
+            if (approvalItems.length === 1) return approvalItems[0].letter_no || ''
+            return approvalItems
+              .map((item, idx) => `${idx + 1}. ${item.letter_no || '-'}`)
+              .join('\r\n')
+          }
+
+          // Approval letter dates (aligned line-by-line if multiple)
+          if (header === 'uni_approval_date' || header === 'university_approval_date') {
+            if (approvalItems.length === 0) return ''
+            if (approvalItems.length === 1) return approvalItems[0].letter_date || ''
+            return approvalItems
+              .map((item, idx) => `${idx + 1}. ${item.letter_date || '-'}`)
+              .join('\r\n')
+          }
+
+          // Approval letter remarks (aligned line-by-line if multiple)
+          if (header === 'uni_approval_remarks' || header === 'university_approval_remarks') {
+            if (approvalItems.length === 0) return ''
+            if (approvalItems.length === 1) return approvalItems[0].remarks || ''
+            return approvalItems
+              .map((item, idx) => `${idx + 1}. ${item.remarks || '-'}`)
+              .join('\r\n')
+          }
+
+          // Appointment letter numbers (aligned line-by-line if multiple)
+          if (header === 'university_appointment_letter_no') {
+            if (appointmentItems.length === 0) return ''
+            if (appointmentItems.length === 1) return appointmentItems[0].letter_no || ''
+            return appointmentItems
+              .map((item, idx) => `${idx + 1}. ${item.letter_no || '-'}`)
+              .join('\r\n')
+          }
+
+          // Appointment letter dates (aligned line-by-line if multiple)
+          if (header === 'university_appointment_date') {
+            if (appointmentItems.length === 0) return ''
+            if (appointmentItems.length === 1) return appointmentItems[0].letter_date || ''
+            return appointmentItems
+              .map((item, idx) => `${idx + 1}. ${item.letter_date || '-'}`)
+              .join('\r\n')
+          }
+
+          // Appointment letter remarks (aligned line-by-line if multiple)
+          if (header === 'university_appointment_remarks') {
+            if (appointmentItems.length === 0) return ''
+            if (appointmentItems.length === 1) return appointmentItems[0].remarks || ''
+            return appointmentItems
+              .map((item, idx) => `${idx + 1}. ${item.remarks || '-'}`)
+              .join('\r\n')
+          }
+
           if (header === 'emergency_contact_number') {
             return data.emergency_contact_number || ''
           }
@@ -1914,12 +2233,23 @@ export default class StaffController {
 
           return val
         })
-        worksheet.addRow(rowValues)
+        const row = worksheet.addRow(rowValues)
+        row.alignment = { vertical: 'top', wrapText: true }
       })
 
       // Generate file buffer
-      const buffer = await workbook.xlsx.writeBuffer()
+      const buffer = Buffer.from(await workbook.xlsx.writeBuffer())
       const uniqueValue = new Date().getTime()
+      const fileName = `staff_data_${uniqueValue}.xlsx`
+
+      // Upload to DigitalOcean Spaces
+      try {
+        const uploadResult = await SpacesService.uploadExport('staff', fileName, buffer)
+        ctx.response.header('x-cloud-url', uploadResult.url)
+        ctx.response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+      } catch (e) {
+        console.error('[StaffController] Failed to upload export to Spaces:', e)
+      }
 
       // Set response headers for file download
       ctx.response.header(
@@ -1928,7 +2258,7 @@ export default class StaffController {
       )
       ctx.response.header(
         'Content-Disposition',
-        `attachment; filename="staff_data_${uniqueValue}.xlsx"`
+        `attachment; filename="${fileName}"`
       )
 
       return ctx.response.send(buffer)

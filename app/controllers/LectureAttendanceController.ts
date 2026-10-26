@@ -11,6 +11,7 @@ import LectureAttendanceDetail from '#models/LectureAttendanceDetail'
 import SubjectDivisionMaster from '#models/SubjectDivisionMaster'
 import StudentEnrollments from '#models/StudentEnrollments'
 import Divisions from '#models/Divisions'
+import SpacesService from '#services/SpacesService'
 
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 
@@ -712,15 +713,31 @@ export default class LectureAttendanceController {
 
       const printer = new PdfPrinter(fonts, fs as any, { resolve: () => {}, resolved: () => Promise.resolve() })
       const pdfDoc = await (printer as any).createPdfKitDocument(docDefinition)
+      const chunks: Buffer[] = []
+      pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk))
+      const pdfBufferPromise = new Promise<Buffer>((resolve, reject) => {
+        pdfDoc.on('end', () => resolve(Buffer.concat(chunks)))
+        pdfDoc.on('error', reject)
+      })
       pdfDoc.end()
+      const pdfBuffer = await pdfBufferPromise
 
       const safeSubject = subjectName.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase()
       const safeDivision = divisionName.replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase()
       const filename = `lecture_attendance_${safeSubject}_${safeDivision}.pdf`
 
+      // Upload to DigitalOcean Spaces
+      try {
+        const uploadResult = await SpacesService.uploadExport('attendance', filename, pdfBuffer)
+        ctx.response.header('x-cloud-url', uploadResult.url)
+        ctx.response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+      } catch (e) {
+        console.error('[LectureAttendanceController] Failed to upload export to Spaces:', e)
+      }
+
       ctx.response.header('Content-Type', 'application/pdf')
       ctx.response.header('Content-Disposition', `attachment; filename="${filename}"`)
-      return ctx.response.stream(pdfDoc)
+      return ctx.response.send(pdfBuffer)
     } catch (error) {
       return ctx.response.status(500).json({ message: 'Error exporting history', error: error.message })
     }
@@ -1320,12 +1337,29 @@ export default class LectureAttendanceController {
 
       const printer = new PdfPrinter(fonts, fs as any, { resolve: () => {}, resolved: () => Promise.resolve() })
       const pdfDoc = await (printer as any).createPdfKitDocument(docDefinition)
+      const chunks: Buffer[] = []
+      pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk))
+      const pdfBufferPromise = new Promise<Buffer>((resolve, reject) => {
+        pdfDoc.on('end', () => resolve(Buffer.concat(chunks)))
+        pdfDoc.on('error', reject)
+      })
       pdfDoc.end()
+      const pdfBuffer = await pdfBufferPromise
 
       const filename = `class_report_div${division_id}.pdf`
+
+      // Upload to DigitalOcean Spaces
+      try {
+        const uploadResult = await SpacesService.uploadExport('attendance', filename, pdfBuffer)
+        ctx.response.header('x-cloud-url', uploadResult.url)
+        ctx.response.header('Access-Control-Expose-Headers', 'x-cloud-url')
+      } catch (e) {
+        console.error('[LectureAttendanceController] Failed to upload export to Spaces:', e)
+      }
+
       ctx.response.header('Content-Type', 'application/pdf')
       ctx.response.header('Content-Disposition', `attachment; filename="${filename}"`)
-      return ctx.response.stream(pdfDoc)
+      return ctx.response.send(pdfBuffer)
     } catch (error) {
       return ctx.response.status(500).json({ message: 'Error exporting report', error: error.message })
     }

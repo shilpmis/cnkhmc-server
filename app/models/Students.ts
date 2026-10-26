@@ -1,5 +1,7 @@
 import Base from '#models/base'
-import { column, hasMany, hasOne, belongsTo } from '@adonisjs/lucid/orm'
+import KavachaColumns from '#services/kavacha_columns'
+import AkshayaVault from '#services/akshaya_vault'
+import { column, hasMany, hasOne, belongsTo, beforeSave } from '@adonisjs/lucid/orm'
 import StudentMeta from './StudentMeta.js'
 import type { HasMany, HasOne, BelongsTo } from '@adonisjs/lucid/types/relations'
 import StudentFeesMaster from './StudentFeesMaster.js'
@@ -85,11 +87,21 @@ export default class Students extends Base {
   @column()
   declare fourth_year_roll_number: number | null
 
-  @column()
+  @column(KavachaColumns.options(KavachaColumns.find('students', 'aadhar_no')))
   declare aadhar_no: number | null
+
+  @column({ serializeAs: null })
+  declare aadhar_no_bidx: string | null
 
   @column()
   declare is_active: boolean
+
+  // Stored as "vault:<uuid>" for protected photos; sent to clients as a short-lived signed link.
+  @column({
+    prepare: (value) => AkshayaVault.toStoredValue(value),
+    serialize: (value) => AkshayaVault.toClientUrl(value),
+  })
+  declare profile_photo: string | null
 
   // Relationships
   @belongsTo(() => Batch, {
@@ -120,4 +132,10 @@ export default class Students extends Base {
     localKey: 'id',
   })
   declare academic_class: HasMany<typeof StudentEnrollments>
+
+  @beforeSave()
+  static sealPiiIndexes(model: Students) {
+    KavachaColumns.refreshIndexes(model, KavachaColumns.forTable('students'))
+  }
+
 }

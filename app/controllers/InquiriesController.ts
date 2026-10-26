@@ -9,6 +9,9 @@ import ClassSeatAvailability from '#models/ClassSeatAvailability'
 import { createStudentValidatorForOnBoarding } from '#validators/Students'
 import QuotaAllocation from '#models/QuotaAllocation'
 import StudentMeta from '#models/StudentMeta'
+import StudentFeesMaster from '#models/StudentFeesMaster'
+import FeesPlan from '#models/FeesPlan'
+import { DateTime } from 'luxon'
 export default class InquiriesController {
   /**
    * Fetch paginated admission inquiries for the logged-in user's school
@@ -239,6 +242,11 @@ export default class InquiriesController {
         })
       }
 
+      if (!payload.division_id) {
+        await trx.rollback()
+        return ctx.response.badRequest({ error: 'division_id is required to enrol the student.' })
+      }
+
       // Generate Unique Admission Number & Enrollment Code
       const enrollmentCode = `EN-${inquiry.school_id}-${Date.now()}`
 
@@ -276,8 +284,8 @@ export default class InquiriesController {
         { client: trx }
       )
 
-      // Determine Quota ID (if applicable)
-      let quotaId = inquiry.applying_for_quota ? inquiry.quota_type : null
+      // Determine Quota ID (if applicable or provided in payload)
+      let quotaId = payload.quota_id !== undefined ? payload.quota_id : (inquiry.applying_for_quota ? inquiry.quota_type : null)
 
       // Check if Quota is Available
       if (quotaId) {
@@ -338,6 +346,30 @@ export default class InquiriesController {
       inquiry.student_enrollments_id = student_enrollments.id
       inquiry.status = 'enrolled'
       await inquiry.save()
+
+      // If fees_plan_id was specified, initialize and lock StudentFeesMaster
+      if (payload.fees_plan_id) {
+        const plan = await FeesPlan.query({ client: trx }).where('id', payload.fees_plan_id).first()
+        if (plan) {
+          await StudentFeesMaster.create(
+            {
+              student_id: student.id,
+              fees_plan_id: plan.id,
+              academic_year: inquiry.academic_year as number,
+              total_amount: Number(plan.total_amount),
+              paid_amount: 0,
+              discounted_amount: 0,
+              due_amount: Number(plan.total_amount),
+              status: 'Pending',
+              is_locked: true,
+              locked_at: DateTime.now(),
+              locked_amount: Number(plan.total_amount),
+              locked_academic_year: inquiry.academic_year as number,
+            },
+            { client: trx }
+          )
+        }
+      }
 
       // Commit Transaction
       await trx.commit()

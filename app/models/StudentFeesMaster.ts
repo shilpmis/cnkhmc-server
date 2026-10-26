@@ -1,6 +1,7 @@
 import Base from '#models/base'
 import { column, hasMany, belongsTo } from '@adonisjs/lucid/orm'
 import type { HasMany, BelongsTo } from '@adonisjs/lucid/types/relations'
+import { DateTime } from 'luxon'
 import StudentFeesInstallments from './StudentFeesInstallments.js'
 import StudentFeesTypeMasters from './StudentFeesTypeMasters.js'
 import BatchProgression from './BatchProgression.js'
@@ -35,6 +36,18 @@ export default class StudentFeesMaster extends Base {
 
   @column()
   declare status: 'Pending' | 'Partially Paid' | 'Paid' | 'Overdue'
+
+  @column()
+  declare is_locked: boolean
+
+  @column.dateTime()
+  declare locked_at: DateTime | null
+
+  @column()
+  declare locked_amount: number | null
+
+  @column()
+  declare locked_academic_year: number | null
 
   @belongsTo(() => BatchProgression, {
     foreignKey: 'batch_progression_id',

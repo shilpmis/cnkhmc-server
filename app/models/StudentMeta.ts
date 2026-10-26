@@ -1,7 +1,8 @@
 //import { DateTime } from 'luxon'
 //import { column } from '@ioc:Adonis/Lucid/Orm'
 import Base from '#models/base'
-import { column } from '@adonisjs/lucid/orm'
+import KavachaColumns from '#services/kavacha_columns'
+import { column, beforeSave } from '@adonisjs/lucid/orm'
 
 export default class StudentMeta extends Base {
 
@@ -10,8 +11,11 @@ export default class StudentMeta extends Base {
     @column()
     declare student_id : number 
 
-    @column()
+    @column(KavachaColumns.options(KavachaColumns.find('students_meta', 'aadhar_dise_no')))
     declare aadhar_dise_no :number | null
+
+    @column({ serializeAs: null })
+    declare aadhar_dise_no_bidx: string | null
 
     @column()
     declare birth_place :string | null
@@ -79,8 +83,11 @@ export default class StudentMeta extends Base {
     @column()
     declare bank_name :string  | null
 
-    @column()
+    @column(KavachaColumns.options(KavachaColumns.find('students_meta', 'account_no')))
     declare account_no :number  | null
+
+    @column({ serializeAs: null })
+    declare account_no_bidx: string | null
 
     @column({ columnName: 'IFSC_code' , serializeAs: 'IFSC_code' })
     declare IFSC_code: string | null
@@ -350,4 +357,31 @@ export default class StudentMeta extends Base {
 
     @column()
     declare bank_branch_name: string | null
+
+    @column()
+    declare name_as_per_aadhar: string | null
+
+    @column()
+    declare admission_quota: string | null
+
+    @column()
+    declare university_spid_no: string | null
+
+    @column()
+    declare admission_category: string | null
+
+    @column()
+    declare tuition_fees: string | null
+
+    @column()
+    declare roll_no_internship: string | null
+
+    @column()
+    declare bank_branch_pincode: string | null
+
+  @beforeSave()
+  static sealPiiIndexes(model: StudentMeta) {
+    KavachaColumns.refreshIndexes(model, KavachaColumns.forTable('students_meta'))
+  }
+
 }

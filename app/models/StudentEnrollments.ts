@@ -37,7 +37,9 @@ export default class StudentEnrollments extends Base {
   })
   declare student: BelongsTo<typeof Students>
 
-  @belongsTo(() => Quota)
+  @belongsTo(() => Quota, {
+    foreignKey: 'quota_id',
+  })
   declare quota: BelongsTo<typeof Quota>
 
   @hasOne(() => Divisions, {
@@ -49,13 +51,13 @@ export default class StudentEnrollments extends Base {
 
   @hasOne(() => StudentFeesMaster, {
     foreignKey: 'student_id',
-    localKey: 'id',
+    localKey: 'student_id',
   })
   declare fees_status: HasOne<typeof StudentFeesMaster>
 
   @hasMany(() => ConcessionStudentMaster, {
     foreignKey: 'student_id',
-    localKey: 'id',
+    localKey: 'student_id',
   })
   declare provided_concession: HasMany<typeof ConcessionStudentMaster>
   

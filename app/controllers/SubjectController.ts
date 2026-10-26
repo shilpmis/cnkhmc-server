@@ -99,6 +99,12 @@ export default class SubjectController {
 
     // Academic session check removed
 
+    if (!payload.division_id) {
+      return ctx.response.status(400).json({
+        message: 'division_id is required',
+      });
+    }
+
     let division = await Divisions
       .query()
       .where('id', payload.division_id)
