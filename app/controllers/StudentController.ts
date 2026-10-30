@@ -303,10 +303,29 @@ export default class StundetsController {
         .json({ message: 'You are not authorized to perform this action!' })
     }
 
+    const search = String(ctx.request.input('search', '')).trim()
+
     try {
       let studentsQuery = await StudentEnrollments.query()
         .where('division_id', division_id)
         .andWhere('academic_year', academic_year as number)
+        .if(search, (q) =>
+          q.whereHas('student', (sq) => {
+            const term = `%${search}%`
+            sq.whereILike('first_name', term)
+              .orWhereILike('middle_name', term)
+              .orWhereILike('last_name', term)
+              .orWhereRaw("CONCAT_WS(' ', first_name, middle_name, last_name) LIKE ?", [term])
+              .orWhereILike('father_name', term)
+              .orWhereRaw('CAST(gr_no AS CHAR) LIKE ?', [term])
+              .orWhereRaw('CAST(first_year_roll_number AS CHAR) LIKE ?', [term])
+              .orWhereRaw('CAST(second_year_roll_number AS CHAR) LIKE ?', [term])
+              .orWhereRaw('CAST(third_year_roll_number AS CHAR) LIKE ?', [term])
+              .orWhereRaw('CAST(fourth_year_roll_number AS CHAR) LIKE ?', [term])
+              .orWhereRaw('CAST(aadhar_no AS CHAR) LIKE ?', [term])
+              .orWhereRaw('CAST(primary_mobile AS CHAR) LIKE ?', [term])
+          })
+        )
         .preload('student', (studentQuery) => {
           if (is_meta_req) {
             studentQuery.preload('student_meta')

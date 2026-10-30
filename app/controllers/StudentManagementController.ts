@@ -404,9 +404,18 @@ export default class StudentManagementController {
       }
 
       if (payload.search) {
-        const term = `%${payload.search}%`
+        const term = `%${payload.search.trim()}%`
         query.whereHas('student', (subQuery) => {
-          subQuery.whereILike('name', term).orWhereILike('roll_number', term)
+          subQuery
+            .whereILike('first_name', term)
+            .orWhereILike('middle_name', term)
+            .orWhereILike('last_name', term)
+            .orWhereRaw("CONCAT_WS(' ', first_name, middle_name, last_name) LIKE ?", [term])
+            .orWhereRaw('CAST(gr_no AS CHAR) LIKE ?', [term])
+            .orWhereRaw('CAST(first_year_roll_number AS CHAR) LIKE ?', [term])
+            .orWhereRaw('CAST(second_year_roll_number AS CHAR) LIKE ?', [term])
+            .orWhereRaw('CAST(third_year_roll_number AS CHAR) LIKE ?', [term])
+            .orWhereRaw('CAST(fourth_year_roll_number AS CHAR) LIKE ?', [term])
         })
       }
 
