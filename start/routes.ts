@@ -613,6 +613,8 @@ router
     router.delete('hostels/rooms/:id', [HostelRoomsController, 'destroy'])
 
     router.post('hostels/allocations', [HostelAllocationsController, 'allocate'])
+    router.get('hostels/allocations/student/:student_id', [HostelAllocationsController, 'showForStudent'])
+    router.put('hostels/allocations/:id', [HostelAllocationsController, 'changeBed'])
     router.put('hostels/allocations/:id/vacate', [HostelAllocationsController, 'vacate'])
 
     // Certificate Templates & Generation

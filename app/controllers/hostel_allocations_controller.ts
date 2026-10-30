@@ -90,6 +90,64 @@ export default class HostelAllocationsController {
     }
   }
 
+  // Current (active) allotment of a student with its bed, room and hostel; null when none.
+  public async showForStudent({ params, response }: HttpContext) {
+    const allocation = await HostelAllocation.query()
+      .where('student_id', params.student_id)
+      .where('status', 'Active')
+      .preload('bed', (bedQuery: any) => {
+        bedQuery.preload('room', (roomQuery: any) => roomQuery.preload('hostel'))
+      })
+      .first()
+
+    return response.ok(allocation ? allocation.serialize() : null)
+  }
+
+  // Move a student with an active allotment to another available bed.
+  public async changeBed({ params, request, response }: HttpContext) {
+    const trx = await db.transaction()
+    try {
+      const bedId = Number(request.input('bed_id'))
+      if (!bedId) {
+        await trx.rollback()
+        return response.badRequest({ message: 'bed_id is required' })
+      }
+
+      const allocation = await HostelAllocation.findOrFail(params.id, { client: trx })
+      if (allocation.status !== 'Active') {
+        await trx.rollback()
+        return response.badRequest({ message: 'Only an active allocation can be changed' })
+      }
+      if (allocation.bedId === bedId) {
+        await trx.rollback()
+        return response.badRequest({ message: 'Student is already allotted to this bed' })
+      }
+
+      const newBed = await HostelBed.findOrFail(bedId, { client: trx })
+      if (newBed.status !== 'Available') {
+        await trx.rollback()
+        return response.badRequest({ message: 'Bed is not available' })
+      }
+
+      const oldBed = await HostelBed.findOrFail(allocation.bedId, { client: trx })
+      oldBed.status = 'Available'
+      await oldBed.save()
+
+      newBed.status = 'Occupied'
+      await newBed.save()
+
+      allocation.bedId = bedId
+      await allocation.save()
+
+      await trx.commit()
+      return response.ok(allocation)
+    } catch (error: any) {
+      await trx.rollback()
+      console.error('Error changing bed:', error)
+      return response.internalServerError({ message: error?.message || 'Error changing bed' })
+    }
+  }
+
   public async vacate({ params, request, response }: HttpContext) {
     const trx = await db.transaction()
     try {
