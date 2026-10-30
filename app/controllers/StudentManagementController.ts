@@ -26,12 +26,25 @@ export default class StudentManagementController {
       })
     }
 
-    console.log("division ", division, academic_year)
+    const search = String(ctx.request.input('search', '')).trim()
+    const status = String(ctx.request.input('status', '')).trim()
 
     let student = await StudentEnrollments
       .query()
       .where('division_id', division)
       .andWhere('academic_year', academic_year)
+      .if(status && status !== 'all', (q) => q.where('status', status))
+      .if(search, (q) =>
+        q.whereHas('student', (sq) => {
+          const term = `%${search}%`
+          sq.whereILike('first_name', term)
+            .orWhereILike('middle_name', term)
+            .orWhereILike('last_name', term)
+            .orWhereRaw("CONCAT_WS(' ', first_name, middle_name, last_name) LIKE ?", [term])
+            .orWhereRaw('CAST(gr_no AS CHAR) LIKE ?', [term])
+            .orWhereILike('enrollment_code', term)
+        })
+      )
       .preload('student', (query) => {
         query.select([
           'id',
