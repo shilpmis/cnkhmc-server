@@ -1366,22 +1366,35 @@ export default class TimeTableController {
       sameDayConfigIds = fetch_day_config_for_same_day.map((c) => c.id);
     }
 
+    // The slot being (re)assigned is replaced by this period, so the row currently stored in the
+    // same division / day / period / batch must not count as another lecture. A period copied in
+    // from a saved timetable version carries a different id than the live row, so the id check
+    // alone is not enough.
+    const isSameSlot = (p: { division_id?: number | null; class_day_config_id: number; period_order: number; batch_name?: string | null }) =>
+      period_config.division_id != null &&
+      Number(p.division_id) === Number(period_config.division_id) &&
+      Number(p.class_day_config_id) === Number(period_config.class_day_config_id) &&
+      Number(p.period_order) === Number(period_config.period_order) &&
+      (p.batch_name || '') === (period_config.batch_name || '')
+
     const periods = cachedAllWeekPeriods
-      ? cachedAllWeekPeriods.filter(p => 
+      ? cachedAllWeekPeriods.filter(p =>
           p.staff_enrollment_id && allEnrollmentIds.includes(p.staff_enrollment_id) &&
           sameDayConfigIds!.includes(p.class_day_config_id) &&
           p.start_time !== null &&
           p.end_time !== null &&
-          (!period_config.id || p.id !== period_config.id)
+          (!period_config.id || p.id !== period_config.id) &&
+          !isSameSlot(p)
         )
-      : await PeriodsConfig.query()
+      : (await PeriodsConfig.query()
           .whereIn('staff_enrollment_id', allEnrollmentIds)
           .whereIn('class_day_config_id', sameDayConfigIds)
           .whereNotNull('start_time')
           .whereNotNull('end_time')
           .preload('period_config_class_day', (q) => q.preload('class'))
           .preload('division')
-          .if(period_config.id, (query) => query.whereNot('id', period_config.id!));
+          .if(period_config.id, (query) => query.whereNot('id', period_config.id!))
+        ).filter((p) => !isSameSlot(p));
 
     // 1. Check for time overlap
     const newStart = this.timeToMinutes(period_config.start_time);
