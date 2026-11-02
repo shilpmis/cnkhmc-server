@@ -1400,9 +1400,18 @@ export default class TimeTableController {
     const newStart = this.timeToMinutes(period_config.start_time);
     const newEnd = this.timeToMinutes(period_config.end_time);
     for (const period of periods) {
+      // A saved timetable version can place the lecture at a different period number or time than
+      // the live rows of the same division, which the save replaces; they are not another lecture.
+      if (
+        period_config.division_id != null &&
+        Number(period.division_id) === Number(period_config.division_id) &&
+        Number(period.class_day_config_id) === Number(period_config.class_day_config_id)
+      ) {
+        continue;
+      }
       const existingStart = this.timeToMinutes(period.start_time);
       const existingEnd = this.timeToMinutes(period.end_time);
-      
+
       if (newStart < existingEnd && newEnd > existingStart) {
         const className = (period as any).period_config_class_day?.class?.class ? `Class/Year ${(period as any).period_config_class_day.class.class}` : '';
         const divisionName = (period as any).division?.division ? `Div ${(period as any).division.division}` : '';
