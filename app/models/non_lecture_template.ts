@@ -41,6 +41,9 @@ export default class NonLectureTemplate extends BaseModel {
   @column({ columnName: 'total_hours' })
   declare totalHours: number
 
+  @column({ columnName: 'teaching_hours' })
+  declare teachingHours: number | null
+
   @column()
   declare description: string | null
 

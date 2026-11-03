@@ -9,7 +9,7 @@ import Staff from '#models/Staff'
 import db from '@adonisjs/lucid/services/db'
 import { DateTime } from 'luxon'
 import Access from '#services/access_control'
-import { recalculateProgress } from '#services/non_lecture_plan'
+import { recalculateProgress, toTeachingHours } from '#services/non_lecture_plan'
 
 /** Roles that may manage any teacher's non-lecture logs (Admin, Principal, IT Admin, Super Admin, HOD, Developer) */
 const LOG_MANAGER_ROLE_IDS = [1, 2, 5, 8, 9, 11]
@@ -126,6 +126,7 @@ export default class NonLectureTemplatesController {
           code: finalCode,
           activityType: finalActivityType,
           totalHours: Number(finalTotalHours),
+          teachingHours: toTeachingHours(body.teaching_hours ?? body.teachingHours),
           description: description || null,
           departmentId: department_id || departmentId || null,
           classId: class_id || classId || null,
@@ -148,7 +149,7 @@ export default class NonLectureTemplatesController {
               templateId: template.id,
               topicOrder: topic.topic_order || topic.topicOrder || order++,
               title: topic.title || topic.name,
-              hours: Number(topic.hours || 1),
+              hours: Number(topic.hours ?? 1),
               activityType: topic.activity_type || topic.activityType || finalActivityType,
               learningObjectives: topic.learning_objectives || topic.learningObjectives || null,
               remarks: topic.remarks || null,
@@ -245,6 +246,9 @@ export default class NonLectureTemplatesController {
       if (total_hours !== undefined || totalHours !== undefined) {
         template.totalHours = Number(total_hours !== undefined ? total_hours : totalHours)
       }
+      if (body.teaching_hours !== undefined || body.teachingHours !== undefined) {
+        template.teachingHours = toTeachingHours(body.teaching_hours ?? body.teachingHours)
+      }
       if (description !== undefined) template.description = description
       if (department_id !== undefined || departmentId !== undefined) {
         template.departmentId = department_id || departmentId || null
@@ -285,7 +289,7 @@ export default class NonLectureTemplatesController {
             templateId: template.id,
             topicOrder: t.topic_order || t.topicOrder || order++,
             title: t.title || t.name,
-            hours: Number(t.hours || 1),
+            hours: Number(t.hours ?? 1),
             activityType: t.activity_type || t.activityType || template.activityType,
             learningObjectives: t.learning_objectives || t.learningObjectives || null,
             remarks: t.remarks || null,
@@ -294,6 +298,9 @@ export default class NonLectureTemplatesController {
           if (t.id) {
             const existingTopic = await NonLectureTemplateTopic.find(t.id, { client: trx })
             if (existingTopic && existingTopic.templateId === template.id) {
+              // a topic with plan rows is as long as its rows add up to; the rows decide, not this form
+              const rowCount = await NonLecturePlanRow.query({ client: trx }).where('topic_id', existingTopic.id).count('* as total')
+              if (Number(rowCount[0].$extras.total) > 0) topicData.hours = Number(existingTopic.hours)
               existingTopic.merge(topicData)
               await existingTopic.save()
             }
@@ -301,6 +308,11 @@ export default class NonLectureTemplatesController {
             await NonLectureTemplateTopic.create(topicData, { client: trx })
           }
         }
+
+        // the template's total is always what its topics add up to
+        const allTopics = await NonLectureTemplateTopic.query({ client: trx }).where('template_id', template.id)
+        template.totalHours = Math.round(allTopics.reduce((s, x) => s + Number(x.hours || 0), 0) * 100) / 100
+        await template.save()
       }
 
       await trx.commit()

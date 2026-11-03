@@ -371,3 +371,10 @@ export async function recalculateProgress(templateId: number): Promise<void> {
     }
   }
 }
+
+/** Teaching hours allotted to a non-lecture subject; empty or invalid input clears the allotment. */
+export const toTeachingHours = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null
+  const hours = Number(value)
+  return Number.isFinite(hours) && hours >= 0 ? Math.round(hours * 100) / 100 : null
+}

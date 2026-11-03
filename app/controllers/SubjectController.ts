@@ -7,6 +7,9 @@ import PeriodsConfig from '#models/PeriodsConfig';
 import { CreateValidatorForAssignSubject, CreateValidatorForAssignSubjectToStaff, CreateValidatorForSubject } from '#validators/Subject'
 import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db';
+import NonLectureTemplateTopic from '#models/non_lecture_template_topic';
+import NonLectureTeacherAssignment from '#models/non_lecture_teacher_assignment';
+import { getNonLectureTemplatesForClass, teachingHoursOf } from '#services/SyllabusHoursService';
 
 
 export default class SubjectController {
@@ -40,6 +43,35 @@ export default class SubjectController {
         message: 'Division not found',
       });
     }
+    // Subjects that have a non-lecture lesson plan for this class belong in the division's subject list,
+    // so the timetable can schedule them. Give the division a row for each one it does not have yet.
+    const nonLectureTemplates = await getNonLectureTemplatesForClass(
+      division.class_id,
+      Number(acadaemic_seesion_id),
+      ctx.auth.user?.school_id
+    );
+    if (nonLectureTemplates.length > 0) {
+      const existingRows = await SubjectDivisionMaster.query()
+        .where('division_id', division_id)
+        .andWhere('academic_year', acadaemic_seesion_id);
+      const existingSubjectIds = new Set(existingRows.map((r) => Number(r.subject_id)));
+      const subjectRows = await Subjects.query().whereIn(
+        'id',
+        [...new Set(nonLectureTemplates.map((t) => Number(t.subjectId)))]
+      );
+      for (const subject of subjectRows) {
+        if (existingSubjectIds.has(Number(subject.id))) continue;
+        await SubjectDivisionMaster.create({
+          subject_id: subject.id,
+          division_id: Number(division_id),
+          academic_year: Number(acadaemic_seesion_id),
+          code_for_division: subject.code || subject.name,
+          description: 'Non-lecture subject',
+          status: 'Active',
+        });
+      }
+    }
+
     let subjects = await SubjectDivisionMaster
       .query()
       .preload('subject_staff_divisioin_master', (staffQuery) => {
@@ -54,7 +86,42 @@ export default class SubjectController {
       .andWhere('division_id', division_id)
       .orderBy('id', 'desc');
 
-    return ctx.response.status(200).json(subjects);
+    if (nonLectureTemplates.length === 0) {
+      return ctx.response.status(200).json(subjects);
+    }
+
+    // Teachers named on the plan's topics or assigned to it; empty means any teaching staff
+    const templateIds = nonLectureTemplates.map((t) => t.id);
+    const topics = await NonLectureTemplateTopic.query().whereIn('template_id', templateIds);
+    const assignments = await NonLectureTeacherAssignment.query()
+      .whereIn('template_id', templateIds)
+      .where('status', 'Active');
+    const infoBySubject = new Map<number, { hours: number; staffIds: Set<number>; templateIds: number[] }>();
+    for (const template of nonLectureTemplates) {
+      const key = Number(template.subjectId);
+      const info = infoBySubject.get(key) || { hours: 0, staffIds: new Set<number>(), templateIds: [] };
+      info.hours += teachingHoursOf(template);
+      info.templateIds.push(template.id);
+      topics
+        .filter((t) => t.templateId === template.id)
+        .forEach((t) => (t.assignedStaffIds || []).forEach((id) => info.staffIds.add(Number(id))));
+      assignments
+        .filter((a) => a.templateId === template.id)
+        .forEach((a) => info.staffIds.add(Number(a.staffId)));
+      infoBySubject.set(key, info);
+    }
+
+    return ctx.response.status(200).json(
+      subjects.map((sdm) => {
+        const info = infoBySubject.get(Number(sdm.subject_id));
+        return {
+          ...sdm.serialize(),
+          is_non_lecture: !!info,
+          non_lecture_hours: info ? info.hours : null,
+          non_lecture_staff_ids: info ? [...info.staffIds] : [],
+        };
+      })
+    );
   }
 
   async createSubject(ctx: HttpContext) {

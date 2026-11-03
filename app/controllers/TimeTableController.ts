@@ -15,6 +15,15 @@ const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 import fs from 'node:fs'
 import path from 'node:path'
 import SpacesService from '#services/SpacesService'
+import {
+  allocatedHoursBySubject,
+  compareWithSyllabus,
+  getSubjectBySdm,
+  getWorkingDayCounts,
+  normalizeYearLevel,
+  requiredHoursForDivision,
+  type WeekDay,
+} from '#services/SyllabusHoursService'
 
 const fonts = {
   Roboto: {
@@ -717,13 +726,45 @@ export default class TimeTableController {
       return ctx.response.badRequest({ message: 'Division not found' })
     }
 
+    // The weekly timetable must give every subject at least its syllabus hours for the session.
+    const firstDayConfig = days.length
+      ? await ClassDayConfig.query().where('id', days[0].class_day_config_id).first()
+      : null
+    const timetableConfig = firstDayConfig
+      ? await SchoolTimeTableConfig.query().where('id', firstDayConfig.school_timetable_config_id).first()
+      : null
+    if (timetableConfig) {
+      const info = await this.loadSyllabusContext(
+        Number(division_id),
+        Number(timetableConfig.academic_year),
+        ctx.auth.user?.school_id
+      )
+      if (info) {
+        const dayById = new Map(info.dayConfigs.map((c) => [Number(c.id), c.day]))
+        const week = days
+          .map((d) => ({ day: dayById.get(Number(d.class_day_config_id)), periods: d.periods }))
+          .filter((d): d is { day: WeekDay; periods: typeof d.periods } => !!d.day)
+        const allocated = allocatedHoursBySubject(week, info.counts, info.subjectBySdm)
+        const { under } = compareWithSyllabus(info.required, allocated)
+        if (under.length > 0) {
+          return ctx.response.badRequest({
+            code: 'SYLLABUS_HOURS_UNDER_ALLOCATED',
+            message:
+              'Allocated hours are below the syllabus hours for: ' +
+              under.map((s) => `${s.name} (${s.allocated.toFixed(1)}h of ${s.required.toFixed(1)}h)`).join(', '),
+            subjects: under,
+          })
+        }
+      }
+    }
+
     let trx = await db.transaction()
     let res: PeriodsConfig[] = []
-    
+
     try {
       for (const day of days) {
         const { class_day_config_id, periods } = day;
-        
+
         let class_day_config = await ClassDayConfig
           .query()
           .where('id', class_day_config_id)
@@ -1013,6 +1054,50 @@ export default class TimeTableController {
 
     await period.delete();
     return ctx.response.ok({ message: 'Period deleted successfully', id: period_id });
+  }
+
+  /** Working days and syllabus hours a division's timetable has to satisfy for a session. */
+  private async loadSyllabusContext(divisionId: number, academicYear: number, schoolId?: number | null) {
+    const division = await Divisions.query().where('id', divisionId).first()
+    if (!division) return null
+    const klass = await Classes.query().where('id', division.class_id).first()
+
+    const dayConfigs = await ClassDayConfig.query()
+      .join('school_timetable_configs', 'school_timetable_configs.id', 'class_day_config.school_timetable_config_id')
+      .where('school_timetable_configs.academic_year', academicYear)
+      .where('class_day_config.class_id', division.class_id)
+      .select('class_day_config.*')
+
+    const yearLevel = normalizeYearLevel(klass?.class)
+    const { counts, isSaturdayWorking } = await getWorkingDayCounts(
+      academicYear,
+      yearLevel,
+      dayConfigs.map((c) => c.day)
+    )
+    const subjectBySdm = await getSubjectBySdm(divisionId, academicYear)
+    const required = await requiredHoursForDivision(subjectBySdm, academicYear, division.class_id, schoolId)
+    return { counts, isSaturdayWorking, subjectBySdm, required, dayConfigs }
+  }
+
+  async getSyllabusHours(ctx: HttpContext) {
+    const divisionId = Number(ctx.params.division_id)
+    const academicYear = Number(ctx.request.input('academic_session_id') || ctx.request.input('academic_year'))
+    if (!divisionId || !academicYear) {
+      return ctx.response.badRequest({ message: 'division_id and academic_session_id are required' })
+    }
+
+    const info = await this.loadSyllabusContext(divisionId, academicYear, ctx.auth.user?.school_id)
+    if (!info) return ctx.response.badRequest({ message: 'Division not found' })
+
+    return ctx.response.ok({
+      working_days: info.counts,
+      is_saturday_working: info.isSaturdayWorking,
+      required: [...info.required].map(([subject_id, v]) => ({
+        subject_id,
+        subject_name: v.name,
+        total_hours: v.hours,
+      })),
+    })
   }
 
   async saveTimetableVersion(ctx: HttpContext) {

@@ -17,6 +17,7 @@ import {
   buildPlanWorkbook,
   parsePlanWorksheet,
   recalculateProgress,
+  toTeachingHours,
   type PlanDocumentInput,
 } from '#services/non_lecture_plan'
 
@@ -64,6 +65,7 @@ const savePlanSchema = vine.compile(
       )
       .maxLength(200),
     removed_topic_ids: vine.array(vine.number()).optional(),
+    teaching_hours: vine.number().min(0).max(10000).nullable().optional(),
   })
 )
 
@@ -166,6 +168,8 @@ export default class NonLecturePlansController {
         subject_id: template.subjectId,
         subject_name: (subjectRow?.name as string | undefined) ?? null,
         academic_session_id: template.academicSessionId,
+        teaching_hours: template.teachingHours === null ? null : Number(template.teachingHours),
+        total_hours: Number(template.totalHours),
         session_label: sessionLabel(template.academicSessionId),
         heading: this.headingFor(template),
         teachers: await this.teacherNames(template.id),
@@ -240,7 +244,7 @@ export default class NonLecturePlansController {
     const template = await this.authorize(ctx, 'update')
     if (!template) return
 
-    const payload = await savePlanSchema.validate(blankToNull(ctx.request.only(['topics', 'removed_topic_ids'])))
+    const payload = await savePlanSchema.validate(blankToNull(ctx.request.only(['topics', 'removed_topic_ids', 'teaching_hours'])))
     const trx = await db.transaction()
 
     try {
@@ -324,6 +328,7 @@ export default class NonLecturePlansController {
       const all = await NonLectureTemplateTopic.query({ client: trx }).where('template_id', template.id)
       template.useTransaction(trx)
       template.totalHours = Math.round(all.reduce((s, t) => s + Number(t.hours || 0), 0) * 100) / 100
+      if (payload.teaching_hours !== undefined) template.teachingHours = toTeachingHours(payload.teaching_hours)
       await template.save()
 
       await trx.commit()
