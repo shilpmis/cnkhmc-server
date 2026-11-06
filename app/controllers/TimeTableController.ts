@@ -567,6 +567,7 @@ export default class TimeTableController {
         res.push(period_config)
       }
       await trx.commit()
+      await this.syncActiveVersion(Number(division_id), Number(school_timetable_config.academic_year))
       return ctx.response.status(201).json(res)
     } catch (error) {
       await trx.rollback()
@@ -701,7 +702,7 @@ export default class TimeTableController {
         res.push(check_period_config)
       }
       await trx.commit()
-      console.log('Update successful')
+      await this.syncActiveVersion(Number(division_id), Number(school_timetable_config.academic_year))
       return ctx.response.status(200).json(res)
     } catch (error) {
       await trx.rollback()
@@ -884,6 +885,9 @@ export default class TimeTableController {
       }
       
       await trx.commit()
+      if (timetableConfig) {
+        await this.syncActiveVersion(Number(division_id), Number(timetableConfig.academic_year))
+      }
       return ctx.response.status(200).json(res)
     } catch (error) {
       await trx.rollback()
@@ -1036,6 +1040,7 @@ export default class TimeTableController {
 
     period.merge(payload_to_update);
     await period.save();
+    await this.syncActiveVersion(Number(period.division_id), Number(school_timetable_config.academic_year));
 
     await period.load('period_config_subject', (sq) => sq.preload('subject'));
     await period.load('period_config_class_day', (cq) => cq.preload('class'));
@@ -1052,7 +1057,15 @@ export default class TimeTableController {
       return ctx.response.notFound({ message: 'Period not found' });
     }
 
+    const class_day_config = await ClassDayConfig.find(period.class_day_config_id);
+    const school_timetable_config = class_day_config
+      ? await SchoolTimeTableConfig.find(class_day_config.school_timetable_config_id)
+      : null;
+
     await period.delete();
+    if (school_timetable_config) {
+      await this.syncActiveVersion(Number(period.division_id), Number(school_timetable_config.academic_year));
+    }
     return ctx.response.ok({ message: 'Period deleted successfully', id: period_id });
   }
 
@@ -1062,11 +1075,14 @@ export default class TimeTableController {
     if (!division) return null
     const klass = await Classes.query().where('id', division.class_id).first()
 
+    // Take the table names from the models so the join cannot drift from the real schema
+    const schoolTable = SchoolTimeTableConfig.table
+    const dayTable = ClassDayConfig.table
     const dayConfigs = await ClassDayConfig.query()
-      .join('school_timetable_configs', 'school_timetable_configs.id', 'class_day_config.school_timetable_config_id')
-      .where('school_timetable_configs.academic_year', academicYear)
-      .where('class_day_config.class_id', division.class_id)
-      .select('class_day_config.*')
+      .join(schoolTable, `${schoolTable}.id`, `${dayTable}.school_timetable_config_id`)
+      .where(`${schoolTable}.academic_year`, academicYear)
+      .where(`${dayTable}.class_id`, division.class_id)
+      .select(`${dayTable}.*`)
 
     const yearLevel = normalizeYearLevel(klass?.class)
     const { counts, isSaturdayWorking } = await getWorkingDayCounts(
@@ -1100,6 +1116,46 @@ export default class TimeTableController {
     })
   }
 
+  /** Periods of a division's live timetable for a session, with the names a snapshot preview shows. */
+  private async loadLivePeriods(divisionId: number, academicYear: number): Promise<PeriodsConfig[]> {
+    const division = await Divisions.query().where('id', divisionId).first()
+    const schoolConfig = await SchoolTimeTableConfig.query().where('academic_year', academicYear).first()
+    if (!division || !schoolConfig) return []
+
+    const dayConfigs = await ClassDayConfig.query()
+      .where('school_timetable_config_id', schoolConfig.id)
+      .andWhere('class_id', division.class_id)
+    if (dayConfigs.length === 0) return []
+
+    return PeriodsConfig.query()
+      .where('division_id', divisionId)
+      .whereIn('class_day_config_id', dayConfigs.map((c) => c.id))
+      .preload('period_config_subject', (sq) => sq.preload('subject'))
+      .preload('staff_enrollment', (seq) => seq.preload('staff'))
+      .preload('lab')
+  }
+
+  /**
+   * The active version is the snapshot loaded into the live timetable, so an edit to the live timetable
+   * belongs to that snapshot only. Without this, edits never reached any snapshot and every snapshot
+   * appeared to share one timetable. A failure here must not undo a save that already succeeded.
+   */
+  private async syncActiveVersion(divisionId: number, academicYear: number) {
+    try {
+      const active = await TimetableVersion.query()
+        .where('division_id', divisionId)
+        .andWhere('academic_year', academicYear)
+        .andWhere('is_active', true)
+        .first()
+      if (!active) return
+
+      active.version_data = JSON.stringify(await this.loadLivePeriods(divisionId, academicYear))
+      await active.save()
+    } catch (error) {
+      console.error('Failed to sync active timetable version:', error)
+    }
+  }
+
   async saveTimetableVersion(ctx: HttpContext) {
     const { division_id, academic_session_id, academic_year, version_name, start_date, end_date, periods_config, is_active } = ctx.request.all();
     const sessionYear = academic_session_id || academic_year;
@@ -1115,22 +1171,7 @@ export default class TimeTableController {
 
     let periodsToSave = periods_config;
     if (!periodsToSave || !Array.isArray(periodsToSave) || periodsToSave.length === 0) {
-      // Fetch current periods for this division from database
-      const schoolConfig = await SchoolTimeTableConfig.query().where('academic_year', Number(sessionYear)).first();
-      if (schoolConfig) {
-        const dayConfigs = await ClassDayConfig.query()
-          .where('school_timetable_config_id', schoolConfig.id)
-          .andWhere('class_id', division.class_id);
-        
-        if (dayConfigs.length > 0) {
-          periodsToSave = await PeriodsConfig.query()
-            .where('division_id', division_id)
-            .whereIn('class_day_config_id', dayConfigs.map(c => c.id))
-            .preload('period_config_subject', (sq) => sq.preload('subject'))
-            .preload('staff_enrollment', (seq) => seq.preload('staff'))
-            .preload('lab');
-        }
-      }
+      periodsToSave = await this.loadLivePeriods(Number(division_id), Number(sessionYear));
     }
 
     // Determine version name
