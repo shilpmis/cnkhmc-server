@@ -16,6 +16,10 @@ export default class Staff extends Base {
   @column()
   declare employee_code: string
 
+  // User ID this staff member punches with on the biometric device (eSSL employee code)
+  @column()
+  declare biometric_code: string | null
+
   @column()
   declare staff_role_id: number
 

@@ -30,6 +30,7 @@ import GlobalSearchController from '#controllers/GlobalSearchController'
 import StudentManagementController from '#controllers/StudentManagementController'
 import PayrollController from '#controllers/PayrollController'
 import StaffAttendanceController from '#controllers/StaffAttendanceController'
+import BiometricAttendanceController from '#controllers/BiometricAttendanceController'
 import SubjectController from '#controllers/SubjectController'
 import TimeTableController from '#controllers/TimeTableController'
 import ReportController from '#controllers/ReportController'
@@ -557,6 +558,17 @@ router
 
     // View attendance
     router.get('staff-attendance/:staff_id', [StaffAttendanceController, 'getStaffAttendance'])
+
+    // Biometric (eSSL) attendance: raw punches, staff links, rules, and daily attendance from punches
+    router.get('biometric/summary', [BiometricAttendanceController, 'summary'])
+    router.post('biometric/employees', [BiometricAttendanceController, 'storeEmployees'])
+    router.post('biometric/punches', [BiometricAttendanceController, 'storePunches'])
+    router.get('biometric/mapping', [BiometricAttendanceController, 'mapping'])
+    router.put('biometric/mapping', [BiometricAttendanceController, 'saveMapping'])
+    router.get('biometric/settings', [BiometricAttendanceController, 'settings'])
+    router.put('biometric/settings', [BiometricAttendanceController, 'saveSettings'])
+    router.post('biometric/process', [BiometricAttendanceController, 'process'])
+    router.get('biometric/daily', [BiometricAttendanceController, 'daily'])
 
     // Internal Messaging Feature
     router.get('/chat/colleagues', [ChatController, 'indexColleagues'])

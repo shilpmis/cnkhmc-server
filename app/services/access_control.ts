@@ -193,6 +193,7 @@ class AccessControl {
     if (/^\/payroll(\/|$)/.test(p)) return { module: 'Payroll', action }
     // Student attendance marking. Staff check-in/out (staff-attendance) is self-service and stays open.
     if (/^\/(attendance|lecture-attendance)(\/|$)/.test(p)) return { module: 'Attendance', action }
+    if (/^\/biometric(\/|$)/.test(p)) return { module: 'Attendance', action }
     return null
   }
 }
