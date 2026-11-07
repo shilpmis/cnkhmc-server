@@ -8,16 +8,36 @@ import ExcelJS from 'exceljs'
 import app from '@adonisjs/core/services/app'
 import path from 'node:path'
 import fs from 'node:fs'
+import type User from '#models/User'
+import { canUseDepartment, deadStockScope, requireAllDepartments } from '#services/dead_stock_access'
 
 export default class DeadStocksController {
-  async index({ request, response }: HttpContext) {
+  async index(ctx: HttpContext) {
+    const { request, response } = ctx
+    const scope = await deadStockScope(ctx.auth.user as User)
     const departmentId = request.input('department_id')
+
+    // A department-limited user sees only items issued to their departments, and only those
+    // departments' transactions (other departments' movements stay hidden).
+    if (!scope.all) {
+      if (scope.departmentIds.length === 0 || departmentId === 'STORE') return response.ok({ data: [] })
+      if (departmentId && departmentId !== 'ALL' && !canUseDepartment(scope, Number(departmentId))) {
+        return response.ok({ data: [] })
+      }
+    }
 
     const query = DeadStock.query()
       .orderBy('created_at', 'desc')
       .preload('transactions', (tQuery) => {
+        if (!scope.all) tQuery.whereIn('department_id', scope.departmentIds)
         tQuery.preload('department').orderBy('transaction_date', 'desc')
       })
+
+    if (!scope.all) {
+      query.whereHas('transactions', (tQuery) => {
+        tQuery.whereIn('department_id', scope.departmentIds)
+      })
+    }
 
     if (departmentId && departmentId !== 'ALL') {
       if (departmentId === 'STORE') {
@@ -33,7 +53,9 @@ export default class DeadStocksController {
     return response.ok({ data: stocks })
   }
 
-  async store({ request, response }: HttpContext) {
+  async store(ctx: HttpContext) {
+    const { request, response } = ctx
+    if (!(await requireAllDepartments(ctx, 'add stock to the central store'))) return
     const payload = await request.validateUsing(createDeadStockValidator)
     
     // Automatically set available quantity to total quantity on creation
@@ -113,7 +135,9 @@ export default class DeadStocksController {
     return response.send(buffer)
   }
 
-  async importExcel({ request, response }: HttpContext) {
+  async importExcel(ctx: HttpContext) {
+    const { request, response } = ctx
+    if (!(await requireAllDepartments(ctx, 'import dead stock'))) return
     const file = request.file('file', {
       extnames: ['xlsx', 'xls', 'csv'],
       size: '20mb',
@@ -348,14 +372,21 @@ export default class DeadStocksController {
     })
   }
 
-  async show({ params, response }: HttpContext) {
-    const stock = await DeadStock.query()
+  async show(ctx: HttpContext) {
+    const { params, response } = ctx
+    const scope = await deadStockScope(ctx.auth.user as User)
+    const query = DeadStock.query()
       .where('id', params.id)
-      .preload('transactions', (query) => {
-        query.preload('department').orderBy('transaction_date', 'desc')
+      .preload('transactions', (tQuery) => {
+        if (!scope.all) tQuery.whereIn('department_id', scope.departmentIds)
+        tQuery.preload('department').orderBy('transaction_date', 'desc')
       })
-      .firstOrFail()
-      
+    if (!scope.all) {
+      query.whereHas('transactions', (tQuery) => tQuery.whereIn('department_id', scope.departmentIds.length ? scope.departmentIds : [0]))
+    }
+
+    const stock = await query.first()
+    if (!stock) return response.notFound({ message: 'Dead stock item not found' })
     return response.ok({ data: stock })
   }
 }

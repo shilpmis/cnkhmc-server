@@ -3,9 +3,16 @@ import { DateTime } from 'luxon'
 import DeadStock from '#models/dead_stock'
 import DeadStockTransaction from '#models/dead_stock_transaction'
 import { issueDeadStockValidator, discardDeadStockValidator, returnDeadStockValidator, transferDeadStockValidator } from '#validators/dead_stock'
+import type User from '#models/User'
+import { canUseDepartment, deadStockScope, requireAllDepartments } from '#services/dead_stock_access'
+
+const NO_DEPARTMENT_ACCESS = { message: 'You do not have dead stock access to this department.' }
 
 export default class DeadStockTransactionsController {
-  async issue({ request, response }: HttpContext) {
+  // Issuing takes stock out of the central store, so it needs all-department access
+  async issue(ctx: HttpContext) {
+    const { request, response } = ctx
+    if (!(await requireAllDepartments(ctx, 'issue stock from the central store'))) return
     const payload = await request.validateUsing(issueDeadStockValidator)
     
     const stock = await DeadStock.findOrFail(payload.deadStockId)
@@ -25,8 +32,12 @@ export default class DeadStockTransactionsController {
     return response.created({ message: 'Stock issued successfully', data: transaction })
   }
 
-  async returnStock({ request, response }: HttpContext) {
+  async returnStock(ctx: HttpContext) {
+    const { request, response } = ctx
     const payload = await request.validateUsing(returnDeadStockValidator)
+    if (!canUseDepartment(await deadStockScope(ctx.auth.user as User), payload.departmentId)) {
+      return response.forbidden(NO_DEPARTMENT_ACCESS)
+    }
     
     const stock = await DeadStock.findOrFail(payload.deadStockId)
 
@@ -42,8 +53,15 @@ export default class DeadStockTransactionsController {
     return response.created({ message: 'Stock returned successfully', data: transaction })
   }
 
-  async discard({ request, response }: HttpContext) {
+  async discard(ctx: HttpContext) {
+    const { request, response } = ctx
     const payload = await request.validateUsing(discardDeadStockValidator)
+    // Discarding from the central store needs all-department access; from a department, access to it
+    if (!payload.departmentId) {
+      if (!(await requireAllDepartments(ctx, 'discard stock from the central store'))) return
+    } else if (!canUseDepartment(await deadStockScope(ctx.auth.user as User), payload.departmentId)) {
+      return response.forbidden(NO_DEPARTMENT_ACCESS)
+    }
     
     const stock = await DeadStock.findOrFail(payload.deadStockId)
     
@@ -67,8 +85,13 @@ export default class DeadStockTransactionsController {
     return response.created({ message: 'Stock discarded successfully', data: transaction })
   }
 
-  async transfer({ request, response }: HttpContext) {
+  async transfer(ctx: HttpContext) {
+    const { request, response } = ctx
     const payload = await request.validateUsing(transferDeadStockValidator)
+    const scope = await deadStockScope(ctx.auth.user as User)
+    if (!canUseDepartment(scope, payload.fromDepartmentId) || !canUseDepartment(scope, payload.toDepartmentId)) {
+      return response.forbidden({ message: 'You need dead stock access to both departments to transfer between them.' })
+    }
     await DeadStock.findOrFail(payload.deadStockId)
     
     // Check if fromDepartment has enough quantity

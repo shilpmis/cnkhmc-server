@@ -44,6 +44,7 @@ import StaffConfigurationsController from '#controllers/StaffConfigurationsContr
 import DeadStocksController from '#controllers/dead_stocks_controller'
 import DeadStockTransactionsController from '#controllers/dead_stock_transactions_controller'
 import InventoryDepartmentsController from '#controllers/inventory_departments_controller'
+import DeadStockAccessController from '#controllers/dead_stock_access_controller'
 import PayrollSettingsController from '#controllers/payroll_settings_controller'
 import PracticalBatchSettingsController from '#controllers/PracticalBatchSettingsController'
 import LectureAttendanceController from '#controllers/LectureAttendanceController'
@@ -582,6 +583,11 @@ router
     router.post('dead-stocks/transfer', [DeadStockTransactionsController, 'transfer'])
 
     // Inventory Departments
+    // Person-based dead stock access (which staff see which inventory departments)
+    router.get('dead-stock-access/me', [DeadStockAccessController, 'me'])
+    router.get('dead-stock-access', [DeadStockAccessController, 'index'])
+    router.put('dead-stock-access/:staff_id', [DeadStockAccessController, 'update'])
+
     router.get('inventory-departments', [InventoryDepartmentsController, 'index'])
     router.post('inventory-departments', [InventoryDepartmentsController, 'store'])
     router.get('inventory-departments/:id', [InventoryDepartmentsController, 'show'])

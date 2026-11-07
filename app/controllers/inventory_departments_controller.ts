@@ -1,14 +1,23 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import InventoryDepartment from '#models/inventory_department'
 import { createInventoryDepartmentValidator, updateInventoryDepartmentValidator } from '#validators/dead_stock'
+import type User from '#models/User'
+import { canUseDepartment, deadStockScope, requireAllDepartments } from '#services/dead_stock_access'
 
 export default class InventoryDepartmentsController {
-  async index({ response }: HttpContext) {
-    const departments = await InventoryDepartment.query()
+  async index(ctx: HttpContext) {
+    const { response } = ctx
+    const scope = await deadStockScope(ctx.auth.user as User)
+    if (!scope.all && scope.departmentIds.length === 0) return response.ok({ data: [] })
+
+    const query = InventoryDepartment.query()
       .orderBy('name', 'asc')
       .preload('transactions', (query) => {
         query.preload('deadStock')
       })
+    // A department-limited user only sees the departments given to them
+    if (!scope.all) query.whereIn('id', scope.departmentIds)
+    const departments = await query
 
     const formatDate = (date: any): string | null => {
       if (!date) return null
@@ -66,18 +75,26 @@ export default class InventoryDepartmentsController {
     return response.ok({ data: departmentsWithItems })
   }
 
-  async store({ request, response }: HttpContext) {
+  async store(ctx: HttpContext) {
+    const { request, response } = ctx
+    if (!(await requireAllDepartments(ctx, 'add dead stock departments'))) return
     const payload = await request.validateUsing(createInventoryDepartmentValidator)
     const department = await InventoryDepartment.create(payload)
     return response.created({ message: 'Inventory department created successfully', data: department })
   }
 
-  async show({ params, response }: HttpContext) {
+  async show(ctx: HttpContext) {
+    const { params, response } = ctx
+    if (!canUseDepartment(await deadStockScope(ctx.auth.user as User), Number(params.id))) {
+      return response.notFound({ message: 'Inventory department not found' })
+    }
     const department = await InventoryDepartment.findOrFail(params.id)
     return response.ok({ data: department })
   }
 
-  async update({ params, request, response }: HttpContext) {
+  async update(ctx: HttpContext) {
+    const { params, request, response } = ctx
+    if (!(await requireAllDepartments(ctx, 'edit dead stock departments'))) return
     const department = await InventoryDepartment.findOrFail(params.id)
     const payload = await request.validateUsing(updateInventoryDepartmentValidator)
     
@@ -87,7 +104,9 @@ export default class InventoryDepartmentsController {
     return response.ok({ message: 'Inventory department updated successfully', data: department })
   }
 
-  async destroy({ params, response }: HttpContext) {
+  async destroy(ctx: HttpContext) {
+    const { params, response } = ctx
+    if (!(await requireAllDepartments(ctx, 'delete dead stock departments'))) return
     const department = await InventoryDepartment.findOrFail(params.id)
     await department.delete()
     return response.ok({ message: 'Inventory department deleted successfully' })
