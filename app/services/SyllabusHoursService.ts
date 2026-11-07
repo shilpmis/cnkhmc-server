@@ -221,6 +221,23 @@ export const getNonLectureTemplatesForClass = async (
     .if(schoolId, (q) => q.where((w) => w.where('school_id', Number(schoolId)).orWhereNull('school_id')))
 }
 
+/**
+ * Activity type(s) of each subject's non-lecture plans (e.g. "Seminar", "Practical"), so the timetable
+ * can show what kind of session a non-lecture subject is wherever it is scheduled.
+ */
+export const activityTypesBySubject = (templates: NonLectureTemplate[]) => {
+  const bySubject = new Map<number, string[]>()
+  for (const template of templates) {
+    const type = String(template.activityType || '').trim()
+    if (!template.subjectId || !type) continue
+    const key = Number(template.subjectId)
+    const list = bySubject.get(key) || []
+    if (!list.includes(type)) list.push(type)
+    bySubject.set(key, list)
+  }
+  return bySubject
+}
+
 /** Hours the timetable owes a non-lecture plan: the allotted teaching hours, else the plan's own total. */
 export const teachingHoursOf = (template: NonLectureTemplate) =>
   Number(template.teachingHours ?? template.totalHours ?? 0)

@@ -9,7 +9,7 @@ import type { HttpContext } from '@adonisjs/core/http'
 import db from '@adonisjs/lucid/services/db';
 import NonLectureTemplateTopic from '#models/non_lecture_template_topic';
 import NonLectureTeacherAssignment from '#models/non_lecture_teacher_assignment';
-import { getNonLectureTemplatesForClass, teachingHoursOf } from '#services/SyllabusHoursService';
+import { activityTypesBySubject, getNonLectureTemplatesForClass, teachingHoursOf } from '#services/SyllabusHoursService';
 
 
 export default class SubjectController {
@@ -111,6 +111,7 @@ export default class SubjectController {
       infoBySubject.set(key, info);
     }
 
+    const activityTypes = activityTypesBySubject(nonLectureTemplates);
     return ctx.response.status(200).json(
       subjects.map((sdm) => {
         const info = infoBySubject.get(Number(sdm.subject_id));
@@ -119,6 +120,8 @@ export default class SubjectController {
           is_non_lecture: !!info,
           non_lecture_hours: info ? info.hours : null,
           non_lecture_staff_ids: info ? [...info.staffIds] : [],
+          // e.g. ["Seminar"]: shown next to the subject name wherever it is in the timetable
+          non_lecture_activity_types: activityTypes.get(Number(sdm.subject_id)) || [],
         };
       })
     );

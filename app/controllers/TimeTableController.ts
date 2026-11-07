@@ -16,6 +16,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import SpacesService from '#services/SpacesService'
 import {
+  activityTypesBySubject,
+  getNonLectureTemplatesForClass,
   allocatedHoursBySubject,
   compareWithSyllabus,
   getSubjectBySdm,
@@ -2229,6 +2231,11 @@ export default class TimeTableController {
       return ctx.response.notFound({ message: 'No timetable configuration found for this class and division.' })
     }
 
+    // Activity type of each non-lecture subject (e.g. "Seminar"), printed under the subject name
+    const activityTypes = activityTypesBySubject(
+      await getNonLectureTemplatesForClass(division.class_id, Number(academic_session_id), ctx.auth.user?.school_id)
+    )
+
     const hasPeriodConfig = school_timetable_config.class_day_config?.some(
       (dayConfig) => dayConfig.period_config && dayConfig.period_config.length > 0
     )
@@ -2329,7 +2336,10 @@ export default class TimeTableController {
             const subject = period.period_config_subject?.subject
             const subjectName = subject ? subject.name : 'Unknown'
             const subjectCode = period.period_config_subject?.code_for_division || subject?.code || ''
-            const subjectDisplay = subjectCode ? `${subjectName}\n(${subjectCode})` : subjectName
+            const activity = subject ? (activityTypes.get(Number(subject.id)) || []).join(', ') : ''
+            const subjectDisplay = [subjectName, subjectCode ? `(${subjectCode})` : '', activity ? `[${activity}]` : '']
+              .filter(Boolean)
+              .join('\n')
 
             cellContent.push({ text: subjectDisplay, style: 'subjectText', alignment: 'center', bold: true })
 
