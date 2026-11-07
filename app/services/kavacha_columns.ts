@@ -74,6 +74,19 @@ class KavachaColumns {
     }
   }
 
+  /**
+   * Decrypts the PII columns of a raw row (query-builder results skip the model's consume step) and
+   * removes the blind-index columns. Mutates and returns the row.
+   */
+  openRow(table: string, row: any): any {
+    if (!row || typeof row !== 'object') return row
+    for (const col of this.forTable(table)) {
+      if (row[col.prop] !== undefined) row[col.prop] = this.options(col).consume(row[col.prop])
+      delete row[col.indexProp]
+    }
+    return row
+  }
+
   /** Hash used for exact-match lookups and uniqueness, e.g. where('aadhar_no_bidx', index(...)). */
   index(table: string, prop: string, value: unknown): string | null {
     const col = this.find(table, prop)

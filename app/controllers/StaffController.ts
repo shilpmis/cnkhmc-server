@@ -17,8 +17,25 @@ import LeavePolicies from '#models/LeavePolicies'
 import StaffLeaveBalance from '#models/StaffLeaveBalance'
 import StaffLetter from '#models/StaffLetter'
 import SpacesService from '#services/SpacesService'
+import AkshayaVault from '#services/akshaya_vault'
 
 export default class StaffController {
+  /**
+   * Makes a raw `staff.*` row look like Staff.serialize(): properties use the model's names where
+   * the database column is named differently (e.g. date_of_appointment -> appointment_date), encrypted
+   * columns are opened, and protected photos become signed links.
+   */
+  private toModelShape(row: any) {
+    for (const [attribute, def] of Staff.$columnsDefinitions.entries()) {
+      if (def.columnName !== attribute && row[def.columnName] !== undefined && row[attribute] === undefined) {
+        row[attribute] = row[def.columnName]
+      }
+    }
+    KavachaColumns.openRow('staff', row)
+    if (row.profile_photo) row.profile_photo = AkshayaVault.toClientUrl(row.profile_photo)
+    return row
+  }
+
   /**
    * List staff with optional filters and pagination
    */
@@ -148,6 +165,11 @@ export default class StaffController {
       } else {
         staff = await staffQuery.paginate(page, perPage)
       }
+
+      // Raw query-builder rows skip the model's column mapping, decryption and photo links.
+      const paged: any = staff
+      const rows: any[] = Array.isArray(paged) ? paged : typeof paged?.all === 'function' ? paged.all() : []
+      rows.forEach((row) => this.toModelShape(row))
 
       // Fallback: If empty, return base staff list for school
       if (alldata && Array.isArray(staff) && staff.length === 0) {
@@ -1209,6 +1231,9 @@ export default class StaffController {
     })
 
     const stringFields = [
+      'employee_code',
+      'title',
+      'designation_on_doa',
       'remarks',
       'first_name',
       'middle_name',
@@ -1797,6 +1822,8 @@ export default class StaffController {
       }
 
       const staff = await query.select(['s.*', 'sm.role', 'd.name as department_name'])
+      // Open encrypted columns (Aadhaar, PAN, account no., UAN) so the export is readable.
+      staff.forEach((row: any) => KavachaColumns.openRow('staff', row))
 
       if (staff.length === 0) {
         return ctx.response.badRequest({ error: 'No staff found matching the criteria' })

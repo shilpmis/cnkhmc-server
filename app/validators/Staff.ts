@@ -301,6 +301,11 @@ export const CreateValidatorForBulkUpload = vine.compile(
     remarks: vine.string().trim().maxLength(255).nullable().optional(),
     staff_role_id: vine.number(),
 
+    // Dropped by the validator before, so "Employee ID", "Title" and "Designation on the DOA" never imported.
+    employee_code: vine.string().trim().maxLength(50).nullable().optional(),
+    title: vine.string().trim().maxLength(50).nullable().optional(),
+    designation_on_doa: vine.string().trim().maxLength(255).nullable().optional(),
+
     first_name: vine.string().trim().maxLength(50).nullable().optional(),
     middle_name: vine.string().trim().maxLength(50).nullable().optional(),
     last_name: vine.string().trim().maxLength(50).nullable().optional(),
