@@ -518,6 +518,8 @@ router
     // Lesson Plans
     router.get('lesson-plans', [LessonPlanController, 'index'])
     router.get('lesson-plans/subject/:subjectId', [LessonPlanController, 'getBySubject'])
+    router.get('lesson-plans/for-period/:periodsConfigId', [LessonPlanController, 'getForPeriod'])
+    router.get('lesson-plans/syllabus-status', [LessonPlanController, 'syllabusStatus'])
     router.post('lesson-plans', [LessonPlanController, 'store'])
     router.post('lesson-plans/:id/topics', [LessonPlanController, 'addTopic'])
     router.get('lesson-plans/reports/coverage/:academicSessionId', [LessonPlanController, 'getCoverageReport'])
@@ -525,6 +527,9 @@ router
     router.post('lesson-plans/bulk-upload', [LessonPlanController, 'bulkUploadSyllabus'])
     router.delete('lesson-plans/subject/:subjectId', [LessonPlanController, 'deleteBySubject'])
     router.patch('lesson-plans/topics/:id/status', [LessonPlanController, 'updateTopicStatus'])
+    // Back to pending: unlink the topic from every daily diary entry and zero its progress
+    router.get('lesson-plans/topics/:id/reset-preview', [LessonPlanController, 'resetTopicPreview'])
+    router.post('lesson-plans/topics/:id/reset', [LessonPlanController, 'resetTopic'])
     router.patch('lesson-plans/subtopics/:id/status', [LessonPlanController, 'updateSubtopicStatus'])
     router.put('lesson-plans/topics/:id/assign', [LessonPlanController, 'assignTopicToTeacher'])
     router.put('lesson-plans/subtopics/:id/assign', [LessonPlanController, 'assignSubtopicToTeacher'])

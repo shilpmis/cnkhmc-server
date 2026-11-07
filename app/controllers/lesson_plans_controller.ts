@@ -13,6 +13,7 @@ import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 import fs from 'node:fs'
 import SpacesService from '#services/SpacesService'
+import { lessonPlanTargetForPeriod } from '#services/lesson_plan_scope'
 
 const fonts = {
   Roboto: {
@@ -103,6 +104,8 @@ export default class LessonPlanController {
     const subjectId = request.input('subjectId') || request.input('subject_id') || request.input('subject')
     const academicYear = request.input('academicYear') || request.input('academic_year') || request.input('academicSessionId') || request.input('academic_session_id')
     const schoolId = auth.user?.school_id || request.header('schoolId')
+    // Sent as form data, so it arrives as the string "true"
+    const replaceExisting = ['true', '1', 'yes'].includes(String(request.input('replace_existing') ?? '').toLowerCase())
 
     if (!schoolId) return response.badRequest({ message: 'School reference missing' })
     if (!subjectId || !academicYear)
@@ -212,25 +215,58 @@ export default class LessonPlanController {
         }
       }
 
-      // ── Get or create LessonPlan (clean slate) ─────────────────────────────
-      const targetSubject = await Subjects.find(subjectId)
-      const resolvedYear = targetSubject?.academic_year || (isNaN(Number(academicYear)) ? 2026 : Number(academicYear)) || 2026
+      // ── Get or create the LessonPlan for this subject IN THIS SESSION (clean slate) ──
+      // A syllabus belongs to one academic session. Subjects are shared by all sessions, so the plan is
+      // found by subject + session: uploading 2024-25 never touches the 2023-24 plan or its progress.
+      const resolvedYear = Number(academicYear)
+      if (!Number.isInteger(resolvedYear) || resolvedYear <= 0) {
+        await trx.rollback()
+        return response.badRequest({ message: 'A valid academic session is required to upload a syllabus' })
+      }
 
       let lp = await LessonPlan.query({ client: trx })
         .where('subject_id', subjectId)
         .where('school_id', schoolId)
+        .where('academic_year', resolvedYear)
         .first()
 
       if (lp) {
-        // Delete all existing topics and subtopics for a clean import
-        console.log(`[Upload Syllabus] Existing LP found (id=${lp.id}). Clearing topics/subtopics…`)
         const oldTopics = await LessonPlanTopic.query({ client: trx }).where('lesson_plan_id', lp.id)
         const oldTopicIds = oldTopics.map(t => t.id)
+
+        // Replacing a syllabus deletes its topics, and with them this session's teaching progress
+        // (taught hours live on the topics, and lecture logs point at them). Only do it when the
+        // person confirmed; otherwise stop before anything is deleted and say what would be lost.
+        if (oldTopicIds.length > 0 && !replaceExisting) {
+          const taughtHours = oldTopics.reduce((acc, t) => acc + (Number(t.completedHours) || 0), 0)
+          let loggedLectures = 0
+          try {
+            const [row] = await db
+              .from('daily_diaries')
+              .whereRaw('JSON_OVERLAPS(topic_ids, CAST(? AS JSON))', [JSON.stringify(oldTopicIds)])
+              .count('* as total')
+            loggedLectures = Number((row as any)?.total || 0)
+          } catch {
+            // older MySQL without JSON_OVERLAPS: the hours above still show the progress
+          }
+          await trx.rollback()
+          return response.conflict({
+            code: 'SYLLABUS_EXISTS',
+            message: 'This subject already has a syllabus in this session. Uploading replaces it and resets its teaching progress. Confirm to replace it.',
+            existing: {
+              topics: oldTopicIds.length,
+              taught_hours: Math.round(taughtHours * 100) / 100,
+              logged_lectures: loggedLectures,
+            },
+          })
+        }
+
+        // Delete all existing topics and subtopics of this session's plan for a clean import
+        console.log(`[Upload Syllabus] Existing LP found (id=${lp.id}, year=${resolvedYear}). Replacing topics/subtopics…`)
         if (oldTopicIds.length > 0) {
           await LessonPlanSubtopic.query({ client: trx }).whereIn('topic_id', oldTopicIds).delete()
         }
         await LessonPlanTopic.query({ client: trx }).where('lesson_plan_id', lp.id).delete()
-        lp.academicYear = resolvedYear
         lp.totalRequiredHours = 0
         await lp.useTransaction(trx).save()
       } else {
@@ -408,6 +444,18 @@ export default class LessonPlanController {
 
       // ── Update total hours on LP ───────────────────────────────────────────
       const allTopics = await LessonPlanTopic.query({ client: trx }).where('lesson_plan_id', lp.id)
+
+      // A file that gave no topics (wrong sheet, unrecognised columns) must not replace a syllabus with
+      // nothing. Rolling back keeps the existing syllabus and its progress exactly as they were.
+      if (allTopics.length === 0) {
+        console.log(`[Upload Syllabus] No topics could be read from the file. Rolling back.`)
+        await trx.rollback()
+        return response.badRequest({
+          code: 'SYLLABUS_FILE_EMPTY',
+          message: 'No syllabus rows could be read from this file. Check that it is the right sheet and has the syllabus columns (topic, competency, hours…). Nothing was changed.',
+        })
+      }
+
       lp.totalRequiredHours = allTopics.reduce((acc, t) => acc + (Number(t.requiredHours) || 0), 0)
       await lp.useTransaction(trx).save()
 
@@ -419,6 +467,60 @@ export default class LessonPlanController {
       await trx.rollback()
       return response.internalServerError({ message: 'Failed to process Excel file', error: error.message })
     }
+  }
+
+  // ── 1b. Which subjects have a syllabus in a session ──────────────────────
+  // One row per subject whose plan in this session has at least one topic, with its size, for the
+  // "syllabus added" indicator in Subject settings. An empty plan does not count as added.
+  public async syllabusStatus({ request, response, auth }: HttpContext) {
+    const schoolId = auth.user?.school_id || request.header('schoolId')
+    const academicYear = Number(
+      request.input('academic_session_id') || request.input('academicSessionId') || request.input('academicYear') || request.input('academic_year')
+    )
+    if (!schoolId) return response.badRequest({ message: 'School reference missing' })
+    if (!Number.isInteger(academicYear) || academicYear <= 0) {
+      return response.badRequest({ message: 'academic_session_id is required' })
+    }
+
+    const rows = await db
+      .from('lesson_plans as lp')
+      .join('lesson_plan_topics as t', 't.lesson_plan_id', 'lp.id')
+      .leftJoin('lesson_plan_subtopics as st', 'st.topic_id', 't.id')
+      .where('lp.school_id', schoolId)
+      .where('lp.academic_year', academicYear)
+      .groupBy('lp.id', 'lp.subject_id', 'lp.updated_at')
+      .select(
+        'lp.subject_id',
+        db.raw("DATE_FORMAT(lp.updated_at, '%Y-%m-%d') as updated_on"),
+        db.raw('COUNT(DISTINCT t.id) as topics'),
+        db.raw('COUNT(DISTINCT st.id) as subtopics')
+      )
+
+    // Hours as the screens count them: a topic's subtopic hours when it has any, else its own hours
+    const hours = await db
+      .from('lesson_plans as lp')
+      .join('lesson_plan_topics as t', 't.lesson_plan_id', 'lp.id')
+      .where('lp.school_id', schoolId)
+      .where('lp.academic_year', academicYear)
+      .select(
+        'lp.subject_id',
+        db.raw(`SUM(COALESCE(NULLIF((SELECT SUM(st.required_hours) FROM lesson_plan_subtopics st WHERE st.topic_id = t.id), 0), t.required_hours, 0)) as total_hours`),
+        db.raw('SUM(COALESCE(t.completed_hours, 0)) as taught_hours')
+      )
+      .groupBy('lp.subject_id')
+    const hoursBySubject = new Map(hours.map((h: any) => [Number(h.subject_id), Number(h.total_hours) || 0]))
+    const taughtBySubject = new Map(hours.map((h: any) => [Number(h.subject_id), Number(h.taught_hours) || 0]))
+
+    return response.ok(
+      rows.map((r: any) => ({
+        subject_id: Number(r.subject_id),
+        topics: Number(r.topics) || 0,
+        subtopics: Number(r.subtopics) || 0,
+        total_hours: Math.round((hoursBySubject.get(Number(r.subject_id)) || 0) * 100) / 100,
+        taught_hours: Math.round((taughtBySubject.get(Number(r.subject_id)) || 0) * 100) / 100,
+        updated_on: r.updated_on || null,
+      }))
+    )
   }
 
   // ── 2. Index ──────────────────────────────────────────────────────────────
@@ -438,51 +540,78 @@ export default class LessonPlanController {
   public async getBySubject({ request, response }: HttpContext) {
     try {
       const subjectId = request.param('subjectId')
-      const subject = await Subjects.find(subjectId)
-
-      let matchingIds: number[] = [Number(subjectId)]
-      if (subject) {
-        const cleanName = subject.name.trim().toLowerCase()
-        const matchingSubjects = await Subjects.query()
-          .whereRaw('LOWER(name) = ?', [cleanName])
-        matchingIds = matchingSubjects.map(s => s.id)
-      }
-
-      // Fetch the latest lesson plan for the subject
-      let lp = await LessonPlan.query()
-        .whereIn('subject_id', matchingIds)
-        .preload('topics', (q) => {
-          q.orderBy('id', 'asc')
-          q.preload('subtopics', (sq) => {
-            sq.orderBy('id', 'asc')
-          })
-        })
-        .orderBy('id', 'desc')
-        .first()
-
-      if (lp && lp.topics) {
-        lp.topics.forEach((topic) => {
-          const topicSubtopics = topic.subtopics || []
-          const subSum = topicSubtopics.reduce((acc, st) => acc + (Number(st.requiredHours) || 0), 0)
-          const realReq = topicSubtopics.length > 0 && subSum > 0 ? subSum : topic.requiredHours
-          topic.requiredHours = realReq
-
-          const isTopicDone = (Number(topic.completedHours) || 0) >= (realReq - 0.01)
-          topic.isCompleted = isTopicDone
-
-          if (topicSubtopics.length > 0) {
-            topicSubtopics.forEach((st) => {
-              st.isCompleted = isTopicDone
-            })
-          }
-        })
-      }
-
-      return response.ok(lp || null)
+      // The session the screen is showing. Each session has its own syllabus and its own progress, so
+      // another session's plan must never be returned in its place.
+      const academicYear = Number(
+        request.input('academic_session_id') || request.input('academicSessionId') || request.input('academicYear') || request.input('academic_year')
+      ) || null
+      return response.ok(await this.loadPlan(Number(subjectId), academicYear))
     } catch (error: any) {
       console.error('Error in getBySubject:', error)
       return response.status(500).json({ message: 'Failed to fetch lesson plan', error: error?.message || String(error) })
     }
+  }
+
+  // ── 3a. Get the plan a timetable period is logged against ────────────────
+  // Subject and session both come from the period itself (its subject assignment and its timetable),
+  // so a lecture is always logged against the syllabus of the session it was taught in, whatever
+  // session the screen happens to show.
+  public async getForPeriod({ request, response }: HttpContext) {
+    try {
+      const target = await lessonPlanTargetForPeriod(Number(request.param('periodsConfigId')))
+      if (!target) return response.notFound({ message: 'Period not found in timetable configuration' })
+      const subjectId = target.subjectId || Number(request.input('subjectId')) || null
+      if (!subjectId) return response.ok(null)
+      return response.ok(await this.loadPlan(subjectId, target.academicYear))
+    } catch (error: any) {
+      console.error('Error in getForPeriod:', error)
+      return response.status(500).json({ message: 'Failed to fetch lesson plan', error: error?.message || String(error) })
+    }
+  }
+
+  /** A subject's lesson plan for one session (newest plan when no session is given), with completion worked out. */
+  private async loadPlan(subjectId: number, academicYear: number | null) {
+    const subject = await Subjects.find(subjectId)
+
+    let matchingIds: number[] = [Number(subjectId)]
+    if (subject) {
+      const cleanName = subject.name.trim().toLowerCase()
+      const matchingSubjects = await Subjects.query()
+        .whereRaw('LOWER(name) = ?', [cleanName])
+      matchingIds = matchingSubjects.map(s => s.id)
+    }
+
+    const query = LessonPlan.query()
+      .whereIn('subject_id', matchingIds)
+      .preload('topics', (q) => {
+        q.orderBy('id', 'asc')
+        q.preload('subtopics', (sq) => {
+          sq.orderBy('id', 'asc')
+        })
+      })
+      .orderBy('id', 'desc')
+    if (academicYear) query.where('academic_year', academicYear)
+    const lp = await query.first()
+
+    if (lp && lp.topics) {
+      lp.topics.forEach((topic) => {
+        const topicSubtopics = topic.subtopics || []
+        const subSum = topicSubtopics.reduce((acc, st) => acc + (Number(st.requiredHours) || 0), 0)
+        const realReq = topicSubtopics.length > 0 && subSum > 0 ? subSum : topic.requiredHours
+        topic.requiredHours = realReq
+
+        const isTopicDone = (Number(topic.completedHours) || 0) >= (realReq - 0.01)
+        topic.isCompleted = isTopicDone
+
+        if (topicSubtopics.length > 0) {
+          topicSubtopics.forEach((st) => {
+            st.isCompleted = isTopicDone
+          })
+        }
+      })
+    }
+
+    return lp || null
   }
 
   // ── 3b. Assign Topic to Teacher ──────────────────────────────────────────
@@ -599,11 +728,9 @@ export default class LessonPlanController {
 
       const query = LessonPlan.query()
 
-      if (subjectId) {
-        query.where('subject_id', subjectId)
-      } else if (academicYear) {
-        query.where('academic_year', academicYear)
-      }
+      // Coverage belongs to one session: a subject's report never mixes in another session's plan
+      if (subjectId) query.where('subject_id', subjectId)
+      if (academicYear) query.where('academic_year', academicYear)
 
       if (schoolId) {
         query.where('school_id', schoolId)
@@ -647,6 +774,92 @@ export default class LessonPlanController {
       console.error('Error in getCoverageReport:', error)
       return response.ok([])
     }
+  }
+
+  // ── 7b. Reset a taught topic back to pending ─────────────────────────────
+  // Taught status comes from the hours lecture logs put on a topic, so marking it pending only sticks
+  // if those logs stop counting. Resetting unlinks the topic (and its subtopics and hours) from every
+  // daily diary entry, and zeroes the topic. The entries and their notes stay; other topics in the
+  // same entry are untouched. The LP export then has no dates or teachers for it and is not
+  // exportable until it is taught again.
+
+  /** Diary entries that log this topic or any of its subtopics. */
+  private async diariesForTopic(topicId: number, subtopicIds: number[], client?: any) {
+    const query = (client ? client.from('daily_diaries') : db.from('daily_diaries'))
+      .where((q: any) => {
+        q.whereRaw('JSON_CONTAINS(topic_ids, ?)', [JSON.stringify(topicId)])
+        q.orWhereRaw('JSON_CONTAINS_PATH(topic_durations, ?, ?)', ['one', `$."${topicId}"`])
+        if (subtopicIds.length) q.orWhereRaw('JSON_OVERLAPS(subtopic_ids, CAST(? AS JSON))', [JSON.stringify(subtopicIds)])
+      })
+      .select('id', 'date', 'topic_ids', 'subtopic_ids', 'topic_durations', 'staff_enrollment_id')
+      .orderBy('date', 'asc')
+    return query
+  }
+
+  /** Resetting changes teachers' logs, so only roles that manage the curriculum may do it. */
+  private canResetTopics(auth: HttpContext['auth']) {
+    // admin, principal, head teacher, super admin, developer (the roles the Curriculum page allows)
+    return [1, 2, 3, 8, 11].includes(Number(auth.user?.role_id))
+  }
+
+  /** What a reset would undo, for the confirmation. */
+  public async resetTopicPreview({ request, response, auth }: HttpContext) {
+    if (!this.canResetTopics(auth)) return response.forbidden({ message: 'Only curriculum administrators can reset taught topics.' })
+    const topic = await LessonPlanTopic.find(Number(request.param('id')))
+    if (!topic) return response.notFound({ message: 'Topic not found' })
+    const subtopicIds = (await db.from('lesson_plan_subtopics').where('topic_id', topic.id).select('id')).map((r: any) => Number(r.id))
+    const diaries = await this.diariesForTopic(topic.id, subtopicIds)
+    const parse = (v: any) => (typeof v === 'string' ? JSON.parse(v || 'null') : v)
+    const dates = [...new Set(diaries.map((d: any) => (d.date instanceof Date ? d.date.toISOString().slice(0, 10) : String(d.date).slice(0, 10))))]
+    const loggedHours = diaries.reduce((acc: number, d: any) => acc + (Number(parse(d.topic_durations)?.[String(topic.id)]) || 0), 0)
+    return response.ok({
+      topic_id: topic.id,
+      topic_name: topic.name,
+      subtopics: subtopicIds.length,
+      completed_hours: Number(topic.completedHours) || 0,
+      logged_hours: Math.round(loggedHours * 100) / 100,
+      diaries: diaries.length,
+      dates,
+    })
+  }
+
+  public async resetTopic({ request, response, auth }: HttpContext) {
+    if (!this.canResetTopics(auth)) return response.forbidden({ message: 'Only curriculum administrators can reset taught topics.' })
+    const topic = await LessonPlanTopic.find(Number(request.param('id')))
+    if (!topic) return response.notFound({ message: 'Topic not found' })
+
+    const subtopicIds = (await db.from('lesson_plan_subtopics').where('topic_id', topic.id).select('id')).map((r: any) => Number(r.id))
+    const subtopicSet = new Set(subtopicIds)
+    const parse = (v: any) => (typeof v === 'string' ? JSON.parse(v || 'null') : v)
+
+    let diariesUpdated = 0
+    await db.transaction(async (trx) => {
+      const diaries = await this.diariesForTopic(topic.id, subtopicIds, trx)
+      for (const d of diaries as any[]) {
+        const topicIds = (parse(d.topic_ids) || []).map(Number).filter((id: number) => id !== topic.id)
+        const subIds = (parse(d.subtopic_ids) || []).map(Number).filter((id: number) => !subtopicSet.has(id))
+        const durations = { ...(parse(d.topic_durations) || {}) }
+        delete durations[String(topic.id)]
+        await trx.from('daily_diaries').where('id', d.id).update({
+          topic_ids: JSON.stringify(topicIds),
+          subtopic_ids: JSON.stringify(subIds),
+          topic_durations: JSON.stringify(durations),
+          updated_at: new Date(),
+        })
+        diariesUpdated++
+      }
+
+      await trx.from('lesson_plan_topics').where('id', topic.id).update({ completed_hours: 0, is_completed: false, updated_at: new Date() })
+      if (subtopicIds.length) {
+        await trx.from('lesson_plan_subtopics').whereIn('id', subtopicIds).update({ is_completed: false, updated_at: new Date() })
+      }
+    })
+
+    return response.ok({
+      message: `"${topic.name}" is back to pending. ${diariesUpdated} daily diary ${diariesUpdated === 1 ? 'entry no longer counts' : 'entries no longer count'} towards it.`,
+      topic_id: topic.id,
+      diaries_updated: diariesUpdated,
+    })
   }
 
   // ── 8. Update Topic Status ────────────────────────────────────────────────

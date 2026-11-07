@@ -9,6 +9,7 @@ import { DateTime } from 'luxon'
 import path from 'node:path'
 import fs from 'node:fs'
 import SpacesService from '#services/SpacesService'
+import { lessonPlanIdFor, lessonPlanTargetForPeriod, planItemIds } from '#services/lesson_plan_scope'
 // @ts-ignore
 import PdfPrinterPkg from 'pdfmake/js/Printer.js'
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
@@ -169,6 +170,36 @@ export default class DailyDiariesController {
       topicIds: inputData.topicIds || [],
       subtopicIds: inputData.subtopicIds || [],
       topicDurations: inputData.topicDurations || {}
+    }
+
+    // A lecture counts only towards the syllabus of the session it was taught in. Every topic and
+    // subtopic must belong to the lesson plan of this period's subject in this period's session, so a
+    // 2023-24 lecture can never mark 2024-25 topics as taught (or the other way round).
+    const requestedTopicIds = [
+      ...(Array.isArray(data.topicIds) ? data.topicIds : []),
+      ...Object.keys(data.topicDurations || {}),
+    ].map(Number).filter((n) => Number.isFinite(n) && n > 0)
+    const requestedSubtopicIds = (Array.isArray(data.subtopicIds) ? data.subtopicIds : [])
+      .map(Number).filter((n) => Number.isFinite(n) && n > 0)
+
+    if (requestedTopicIds.length || requestedSubtopicIds.length) {
+      const target = await lessonPlanTargetForPeriod(Number(inputData.periodsConfigId))
+      const subjectId = target?.subjectId || Number(request.input('subjectId')) || null
+      if (!target || !subjectId) {
+        return response.badRequest({ message: 'This period has no subject assigned, so syllabus topics cannot be logged for it.' })
+      }
+      const planId = await lessonPlanIdFor(subjectId, target.academicYear)
+      if (!planId) {
+        return response.badRequest({ message: 'There is no syllabus for this subject in the session of this timetable, so topics cannot be logged.' })
+      }
+      const allowed = await planItemIds(planId)
+      const outside =
+        requestedTopicIds.some((id) => !allowed.topicIds.has(id)) || requestedSubtopicIds.some((id) => !allowed.subtopicIds.has(id))
+      if (outside) {
+        return response.badRequest({
+          message: "Some selected topics belong to another session's syllabus. Close the log, open it again and select the topics again.",
+        })
+      }
     }
 
     const inputTopicDurations = data.topicDurations || {}
