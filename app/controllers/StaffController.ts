@@ -1822,8 +1822,8 @@ export default class StaffController {
       }
 
       const staff = await query.select(['s.*', 'sm.role', 'd.name as department_name'])
-      // Open encrypted columns (Aadhaar, PAN, account no., UAN) so the export is readable.
-      staff.forEach((row: any) => KavachaColumns.openRow('staff', row))
+      // Map renamed columns (e.g. date_of_passing -> passing_date) and open encrypted ones (Aadhaar, PAN, account no., UAN).
+      staff.forEach((row: any) => this.toModelShape(row))
 
       if (staff.length === 0) {
         return ctx.response.badRequest({ error: 'No staff found matching the criteria' })
