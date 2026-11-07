@@ -214,6 +214,13 @@ export default class UsersController {
       })
     }
 
+    const usernameTaken = await User.query().where('username', payload.username).first()
+    if (usernameTaken) {
+      return ctx.response.status(400).json({
+        message: `The username "${payload.username}" is already taken. Please choose a different username.`,
+      })
+    }
+
     const isHospitalStaff = staff.staff_type === 'Hospital Staff'
     const isTeachingStaff = !isHospitalStaff && Boolean(staff.role_type?.is_teaching_role)
     const assignedRoleId = isTeachingStaff ? 6 : 12
@@ -240,6 +247,7 @@ export default class UsersController {
           const clas = await Divisions.query().where('id', division_id).first()
 
           if (!clas) {
+            await trx.rollback()
             return ctx.response.status(404).json({
               message: 'Class not found',
             })
