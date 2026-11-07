@@ -33,7 +33,7 @@ export default class StaffExperiencesController {
 
         // 1. Clean honorifics from sheet name ("Dr Bhavana Patel" -> "Bhavana Patel")
         const cleanName = sheetName
-          .replace(/^(dr|mr|mrs|prof|miss|ms)\.?\s+/i, '')
+          .replace(/^(dr|mr|mrs|prof|miss|ms)(\.\s*|\s+)/i, '')
           .trim()
 
         const nameTokens = cleanName.split(/\s+/).filter(Boolean)
