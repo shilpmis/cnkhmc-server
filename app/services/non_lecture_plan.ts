@@ -91,8 +91,24 @@ export function headKeyFor(heading: string): keyof PlanRowInput | 'hours' | null
   if (c.includes('tl') || c.includes('method') || c.includes('media')) return 'tlMm'
   if (c.includes('assessment') || c.includes('formative')) return 'assessment'
   if (c.includes('integration')) return 'integration'
-  if (c === 'hours' || c === 'hrs' || c.includes('requiredhour')) return 'hours'
+  // "Hours", "Hrs", "Hours Required", "No. of Hours", "Duration (hrs)" ...
+  if (c === 'hrs' || c.includes('hour') || c.includes('duration')) return 'hours'
   return null
+}
+
+/**
+ * Hours from a sheet cell: "2", "1.5", "1,5", "1.5 hrs", "1:30" (hours:minutes) or "45 min".
+ * Returns null when the cell holds no usable number.
+ */
+export function parseHoursCell(text: string): number | null {
+  const t = text.trim().toLowerCase().replace(',', '.')
+  const clock = /^(\d{1,3}):(\d{2})$/.exec(t)
+  if (clock) return Number(clock[1]) + Number(clock[2]) / 60
+  const num = /^(\d+(?:\.\d+)?)/.exec(t)
+  if (!num) return null
+  const value = Number(num[1])
+  if (!Number.isFinite(value) || value <= 0) return null
+  return /min/.test(t) ? value / 60 : value
 }
 
 const emptyRow = (): PlanRowInput => ({
@@ -168,6 +184,9 @@ export function parsePlanWorksheet(ws: ExcelJS.Worksheet): ParsedPlan {
         current = { title: `Topic ${topics.length + 1}`, rows: [] }
         topics.push(current)
       }
+      if (!Object.values(columnMap).includes('hours')) {
+        warnings.push(`"${current.title}": no Hours column was found, so every row counts as 1 hour.`)
+      }
       continue
     }
 
@@ -180,8 +199,9 @@ export function parsePlanWorksheet(ws: ExcelJS.Worksheet): ParsedPlan {
         const text = texts[Number(colStr) - 1] ?? ''
         if (!text) continue
         if (key === 'hours') {
-          const hours = Number(text)
-          if (Number.isFinite(hours) && hours > 0) item.requiredHours = hours
+          const hours = parseHoursCell(text)
+          if (hours !== null) item.requiredHours = Math.round(hours * 100) / 100
+          else warnings.push(`Row ${r}: the hours value "${text}" was not understood, so 1 hour is used.`)
           continue
         }
         ;(item as any)[key] = text

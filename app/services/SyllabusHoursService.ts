@@ -94,6 +94,63 @@ const parseHolidays = (raw: unknown, yearLevel: string): Set<string> => {
   return dates
 }
 
+/**
+ * Title of the academic calendar entry that closes the school on a date, or null on a working day.
+ * Only entries marked non-working count. An entry for one year level closes a class of that level; one
+ * for "All" closes everybody. The class is optional: without it only "All" entries apply.
+ * `academicYears` are the calendar settings to check; without them the years around the date are used.
+ */
+export const getCalendarClosure = async (
+  date: string,
+  opts: { academicYears?: Array<number | null | undefined>; classId?: number | null; divisionId?: number | null } = {}
+): Promise<string | null> => {
+  const day = String(date || '').split('T')[0]
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
+
+  let classId = opts.classId ? Number(opts.classId) : null
+  if (!classId && opts.divisionId) {
+    const division = await db.from('divisions').where('id', Number(opts.divisionId)).first()
+    classId = division?.class_id ? Number(division.class_id) : null
+  }
+  let yearLevel = 'All'
+  if (classId) {
+    const cls = await db.from('classes').where('id', classId).first()
+    yearLevel = normalizeYearLevel(cls?.class)
+  }
+
+  const dateYear = Number(day.slice(0, 4))
+  const years = [...new Set((opts.academicYears || []).map(Number).filter((n) => Number.isFinite(n) && n > 0))]
+  let settings = years.length ? await AcademicCalendarSetting.query().whereIn('academic_year', years) : []
+  if (!settings.length) {
+    settings = await AcademicCalendarSetting.query().whereIn('academic_year', [dateYear, dateYear - 1])
+  }
+  for (const setting of settings) {
+    const raw = setting.non_working_dates
+    if (!Array.isArray(raw)) continue
+    for (const item of raw) {
+      if (typeof item === 'string' && item.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(item)
+          const level = normalizeYearLevel(parsed.applicableYear || parsed.year || parsed.targetYear)
+          const applies = level === 'All' || level === yearLevel
+          if (applies && parsed.isWorkingDay === false && String(parsed.date || '').split('T')[0] === day) {
+            return String(parsed.title || 'a non-working day')
+          }
+        } catch {
+          // skip malformed entry
+        }
+      } else if (item && String(item).split('T')[0] === day) {
+        return 'a holiday'
+      }
+    }
+  }
+  return null
+}
+
+/** Message shown when a teacher tries to log on a day the calendar has closed. */
+export const closureMessage = (date: string, title: string) =>
+  `Logging is not allowed on ${String(date).split('T')[0]}: the academic calendar marks it as non-working (${title}).`
+
 /** Number of teaching days per weekday in the session for a class, after holidays and Sundays. */
 export const getWorkingDayCounts = async (
   academicYear: number,

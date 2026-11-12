@@ -9,6 +9,7 @@ import { DateTime } from 'luxon'
 import path from 'node:path'
 import fs from 'node:fs'
 import SpacesService from '#services/SpacesService'
+import { closureMessage, getCalendarClosure } from '#services/SyllabusHoursService'
 import { lessonPlanIdFor, lessonPlanTargetForPeriod, planItemIds } from '#services/lesson_plan_scope'
 // @ts-ignore
 import PdfPrinterPkg from 'pdfmake/js/Printer.js'
@@ -75,7 +76,8 @@ export default class DailyDiariesController {
       .select(
         'stc.academic_year',
         'pc.staff_enrollment_id',
-        'pc.subjects_division_masters_id'
+        'pc.subjects_division_masters_id',
+        'pc.division_id'
       )
       .first()
 
@@ -84,6 +86,15 @@ export default class DailyDiariesController {
     if (!periodDetails) {
       console.log('DailyDiary Store - Error: Period not found', { periodsConfigId: inputData.periodsConfigId })
       return response.badRequest({ message: 'Period not found in timetable configuration' })
+    }
+
+    // Vacations and holidays from the academic calendar: teachers cannot log on those days
+    if (user.role_id === 6 || user.role_id === 10) {
+      const closure = await getCalendarClosure(inputData.date, {
+        academicYears: [periodDetails.academic_year],
+        divisionId: periodDetails.division_id,
+      })
+      if (closure) return response.badRequest({ message: closureMessage(inputData.date, closure) })
     }
 
     let targetStaffEnrollmentId: number | null = null
@@ -283,6 +294,14 @@ export default class DailyDiariesController {
 
     if (!targetStaffId) {
       return response.forbidden({ message: 'No staff ID associated with user' })
+    }
+
+    if (user.role_id === 6 || user.role_id === 10) {
+      for (const item of rawEntries) {
+        if (!item.date) continue
+        const closure = await getCalendarClosure(item.date)
+        if (closure) return response.badRequest({ message: closureMessage(item.date, closure) })
+      }
     }
 
     const createdEntries = []

@@ -10,6 +10,7 @@ import db from '@adonisjs/lucid/services/db'
 import { DateTime } from 'luxon'
 import Access from '#services/access_control'
 import { recalculateProgress, toTeachingHours } from '#services/non_lecture_plan'
+import { closureMessage, getCalendarClosure } from '#services/SyllabusHoursService'
 
 /** Roles that may manage any teacher's non-lecture logs (Admin, Principal, IT Admin, Super Admin, HOD, Developer) */
 const LOG_MANAGER_ROLE_IDS = [1, 2, 5, 8, 9, 11]
@@ -582,6 +583,17 @@ export default class NonLectureTemplatesController {
       }
 
       const finalDate = body.date || new Date().toISOString().split('T')[0]
+
+      // Vacations and holidays from the academic calendar: teachers cannot log on those days
+      if ([6, 10].includes(Number(user.role_id))) {
+        const closure = await getCalendarClosure(finalDate, {
+          academicYears: [template.academicSessionId],
+          classId: template.classId,
+        })
+        if (closure) {
+          return response.badRequest({ success: false, message: closureMessage(finalDate, closure) })
+        }
+      }
 
       // Same rule as the subject daily diary: teachers log for today unless they were given permission for that date
       if ([6, 10].includes(Number(user.role_id))) {
