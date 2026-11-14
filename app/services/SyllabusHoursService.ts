@@ -1,5 +1,4 @@
 import AcademicCalendarSetting from '#models/AcademicCalendarSetting'
-import LessonPlan from '#models/LessonPlan'
 import NonLectureTemplate from '#models/non_lecture_template'
 import SubjectDivisionMaster from '#models/SubjectDivisionMaster'
 import db from '@adonisjs/lucid/services/db'
@@ -25,6 +24,9 @@ export type SubjectHoursIssue = {
   required: number
   allocated: number
 }
+
+/** Hours a subject owes: from its lecture lesson plan and/or its non-lecture plan. */
+export type RequiredHours = { name: string; hours: number; nonLecture?: boolean }
 
 const WEEKDAYS: WeekDay[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 const DAY_BY_INDEX: (WeekDay | null)[] = [null, 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
@@ -55,7 +57,7 @@ const extractMonthIndex = (monthString: string): number => {
  * First and last day of the academic session. Sessions are identified by their start year; one that
  * was never saved falls back to the same window the sessions list offers (January to December).
  */
-const getSessionRange = async (academicYear: number) => {
+export const getSessionRange = async (academicYear: number) => {
   const row = await db.from('academic_sessions').where('start_year', academicYear).first()
   const startYear = row ? Number(row.start_year) : academicYear
   const endYear = row ? Number(row.end_year) : academicYear + 1
@@ -147,6 +149,36 @@ export const getCalendarClosure = async (
   return null
 }
 
+export type CalendarClosure = { date: string; title: string; level: string }
+
+/** Every non-working calendar entry of a session, with the year level it applies to ("All" or e.g. "1st Year"). */
+export const listCalendarClosures = async (academicYear: number): Promise<CalendarClosure[]> => {
+  const setting = await AcademicCalendarSetting.findBy('academic_year', academicYear)
+  const raw = setting?.non_working_dates
+  if (!Array.isArray(raw)) return []
+
+  const closures: CalendarClosure[] = []
+  for (const item of raw) {
+    if (typeof item === 'string' && item.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(item)
+        if (parsed.date && parsed.isWorkingDay === false) {
+          closures.push({
+            date: String(parsed.date).split('T')[0],
+            title: String(parsed.title || 'a non-working day'),
+            level: normalizeYearLevel(parsed.applicableYear || parsed.year || parsed.targetYear),
+          })
+        }
+      } catch {
+        // skip malformed entry
+      }
+    } else if (item) {
+      closures.push({ date: String(item).split('T')[0], title: 'a holiday', level: 'All' })
+    }
+  }
+  return closures
+}
+
 /** Message shown when a teacher tries to log on a day the calendar has closed. */
 export const closureMessage = (date: string, title: string) =>
   `Logging is not allowed on ${String(date).split('T')[0]}: the academic calendar marks it as non-working (${title}).`
@@ -173,30 +205,114 @@ export const getWorkingDayCounts = async (
   return { counts, isSaturdayWorking }
 }
 
-/** Total syllabus hours per subject, taken from the lesson plans of the academic session. */
-export const getRequiredHoursBySubject = async (academicYear: number, schoolId?: number | null) => {
-  const query = LessonPlan.query().where('academic_year', academicYear)
-  if (schoolId) query.where('school_id', schoolId)
+const toDateKey = (value: unknown): string | null => {
+  if (!value) return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10)
+  const s = String(value).slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null
+}
 
-  const lessonPlans = await query
-    .preload('subject')
-    .preload('topics', (q) => q.preload('subtopics'))
+/** Dates the calendar closes for a year level, and whether Saturdays are teaching days. */
+export const getClosedDates = async (academicYear: number, yearLevel: string) => {
+  const setting = await AcademicCalendarSetting.findBy('academic_year', academicYear)
+  return {
+    holidays: parseHolidays(setting?.non_working_dates, yearLevel),
+    isSaturdayWorking: setting ? setting.is_saturday_working !== false : true,
+  }
+}
+
+/** One weekly timetable and the dates it runs on: a saved version, or the live timetable of an unversioned session. */
+export type AllocationSpan = {
+  /** Where two spans overlap the later-saved one (higher priority) owns the day. */
+  priority: number
+  /** YYYY-MM-DD; null means the start / end of the session. */
+  start: string | null
+  end: string | null
+  week: { day: WeekDay; periods: AllocationPeriod[] }[]
+}
+
+const MAX_SPAN_DAYS = 3660
+
+/**
+ * Hours allocated per subject over a session whose timetable changes over time (timetable history).
+ * For every working day (no Sunday, no calendar holiday, Saturday only if working) the timetable of the
+ * version covering that day is the one that runs, so each version contributes
+ * lectures per weekday x working days of that weekday inside its own dates, and the versions add up.
+ */
+export const allocateAcrossSpans = (
+  spans: AllocationSpan[],
+  range: { start: Date; end: Date },
+  closed: { holidays: Set<string>; isSaturdayWorking: boolean },
+  subjectBySdm: Map<number, number>
+) => {
+  const rangeStart = range.start.toISOString().slice(0, 10)
+  const rangeEnd = range.end.toISOString().slice(0, 10)
+  const resolved = spans.map((s) => ({
+    ...s,
+    startKey: toDateKey(s.start) ?? rangeStart,
+    endKey: toDateKey(s.end) ?? rangeEnd,
+    counts: { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0 } as WorkingDayCounts,
+  }))
+
+  if (resolved.length > 0) {
+    const first = resolved.reduce((m, s) => (s.startKey < m ? s.startKey : m), resolved[0].startKey)
+    const last = resolved.reduce((m, s) => (s.endKey > m ? s.endKey : m), resolved[0].endKey)
+    const d = new Date(`${first}T00:00:00Z`)
+    for (let i = 0; i < MAX_SPAN_DAYS; i++, d.setUTCDate(d.getUTCDate() + 1)) {
+      const key = d.toISOString().slice(0, 10)
+      if (key > last) break
+      const day = DAY_BY_INDEX[d.getUTCDay()]
+      if (!day) continue
+      if (day === 'sat' && !closed.isSaturdayWorking) continue
+      if (closed.holidays.has(key)) continue
+
+      let owner: (typeof resolved)[number] | null = null
+      for (const s of resolved) {
+        if (s.startKey <= key && key <= s.endKey && (!owner || s.priority > owner.priority)) owner = s
+      }
+      if (owner) owner.counts[day]++
+    }
+  }
+
+  const allocated = new Map<number, number>()
+  for (const s of resolved) {
+    for (const [subjectId, hours] of allocatedHoursBySubject(s.week, s.counts, subjectBySdm)) {
+      allocated.set(subjectId, (allocated.get(subjectId) || 0) + hours)
+    }
+  }
+  return {
+    allocated,
+    spans: resolved.map((s) => ({ priority: s.priority, start: s.startKey, end: s.endKey, working_days: s.counts })),
+  }
+}
+
+/**
+ * Total syllabus hours per subject, taken from the lesson plans of the academic session. A topic with
+ * subtopics owes the sum of its subtopics' hours, otherwise its own hours. One summed query: loading every
+ * topic and subtopic of every plan made this the slowest part of the hours check.
+ */
+export const getRequiredHoursBySubject = async (academicYear: number, schoolId?: number | null) => {
+  const bindings: (number | null)[] = [academicYear]
+  if (schoolId) bindings.push(schoolId)
+  const [rows] = await db.rawQuery(
+    `SELECT lp.subject_id AS subject_id,
+            COALESCE(s.name, 'Unknown Subject') AS name,
+            COALESCE(SUM(CASE WHEN COALESCE(st.cnt, 0) > 0 THEN st.hours ELSE t.required_hours END), 0) AS hours
+       FROM lesson_plans lp
+       LEFT JOIN subjects s ON s.id = lp.subject_id
+       LEFT JOIN lesson_plan_topics t ON t.lesson_plan_id = lp.id
+       LEFT JOIN (
+         SELECT topic_id, COUNT(*) AS cnt, COALESCE(SUM(required_hours), 0) AS hours
+           FROM lesson_plan_subtopics GROUP BY topic_id
+       ) st ON st.topic_id = t.id
+      WHERE lp.academic_year = ? ${schoolId ? 'AND lp.school_id = ?' : ''}
+      GROUP BY lp.subject_id, s.name`,
+    bindings
+  )
 
   const bySubject = new Map<number, { name: string; hours: number }>()
-  for (const lp of lessonPlans) {
-    let hours = 0
-    for (const topic of lp.topics || []) {
-      if (topic.subtopics && topic.subtopics.length > 0) {
-        for (const st of topic.subtopics) hours += Number(st.requiredHours) || 0
-      } else {
-        hours += Number(topic.requiredHours) || 0
-      }
-    }
-    const current = bySubject.get(lp.subjectId)
-    bySubject.set(lp.subjectId, {
-      name: lp.subject?.name || current?.name || 'Unknown Subject',
-      hours: (current?.hours || 0) + hours,
-    })
+  for (const row of rows as any[]) {
+    bySubject.set(Number(row.subject_id), { name: String(row.name), hours: Number(row.hours) || 0 })
   }
   return bySubject
 }
@@ -307,7 +423,7 @@ export const requiredHoursForDivision = async (
   schoolId?: number | null
 ) => {
   const divisionSubjects = new Set(subjectBySdm.values())
-  const required = new Map<number, { name: string; hours: number }>()
+  const required = new Map<number, RequiredHours>()
 
   const lectureHours = await getRequiredHoursBySubject(academicYear, schoolId)
   for (const [subjectId, value] of lectureHours) {
@@ -327,25 +443,32 @@ export const requiredHoursForDivision = async (
     required.set(subjectId, {
       name: current?.name || subjectNames.get(subjectId) || template.title,
       hours: (current?.hours || 0) + teachingHoursOf(template),
+      nonLecture: true,
     })
   }
   return required
 }
 
 /** Compares the allocated hours of a weekly timetable with the syllabus hours of every subject. */
-export const compareWithSyllabus = (
-  required: Map<number, { name: string; hours: number }>,
-  allocated: Map<number, number>
-) => {
+/** ok / under / over for allocated against required hours, within the rounding tolerance. */
+export const hoursStatus = (required: number, allocated: number): 'ok' | 'under' | 'over' =>
+  allocated < required - TOLERANCE_HOURS ? 'under' : allocated > required + TOLERANCE_HOURS ? 'over' : 'ok'
+
+/**
+ * A lecture subject without syllabus hours is not checked. A subject with a non-lecture plan always is, even
+ * when the plan owes 0 hours: hours given to it in the timetable are then over-allocation.
+ */
+export const compareWithSyllabus = (required: Map<number, RequiredHours>, allocated: Map<number, number>) => {
   const under: SubjectHoursIssue[] = []
   const over: SubjectHoursIssue[] = []
 
-  for (const [subjectId, { name, hours }] of required) {
-    if (hours <= 0) continue
+  for (const [subjectId, { name, hours, nonLecture }] of required) {
+    if (hours <= 0 && !nonLecture) continue
     const allocatedHours = allocated.get(subjectId) || 0
     const issue = { subject_id: subjectId, name, required: hours, allocated: allocatedHours }
-    if (allocatedHours < hours - TOLERANCE_HOURS) under.push(issue)
-    else if (allocatedHours > hours + TOLERANCE_HOURS) over.push(issue)
+    const status = hoursStatus(hours, allocatedHours)
+    if (status === 'under') under.push(issue)
+    else if (status === 'over') over.push(issue)
   }
   return { under, over }
 }

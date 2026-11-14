@@ -117,7 +117,7 @@ export default class NonLectureTemplatesController {
 
       const finalSchoolId = body.school_id || body.schoolId || auth?.user?.school_id || 1
       const finalCode = code || title.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_').substring(0, 30)
-      const finalActivityType = activity_type || activityType || 'Clinical Posting'
+      const finalActivityType = activity_type || activityType || 'Clinical'
       const finalIsActive = isActive !== undefined ? isActive : is_active
       const finalTotalHours = total_hours !== undefined ? total_hours : (totalHours || 0)
 

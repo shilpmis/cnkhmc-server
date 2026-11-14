@@ -498,6 +498,7 @@ router
     router.get('timetable/:division_id', [TimeTableController ,'fetchTimeTableForDivision'])
     router.get('timetable/export/:division_id', [TimeTableController ,'exportTimeTablePDF'])
     router.get('timetable/syllabus-hours/:division_id', [TimeTableController, 'getSyllabusHours'])
+    router.post('timetable/hours-check', [TimeTableController, 'getHoursCheck'])
     router.post('timetable/verify/config/period', [TimeTableController ,'checkAvailabilityForConfiguredPeriod'])
     router.post('timetable/auto-generate/:division_id', [TimeTableController ,'generateWeeklyTimeTableForClass'])
     router.post('timetable/config/period', [TimeTableController ,'createTimeTableForDivisionForADay'])    

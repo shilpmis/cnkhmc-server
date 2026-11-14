@@ -15,13 +15,21 @@ const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 import fs from 'node:fs'
 import path from 'node:path'
 import SpacesService from '#services/SpacesService'
+import { DateTime } from 'luxon'
 import {
   activityTypesBySubject,
   getNonLectureTemplatesForClass,
-  allocatedHoursBySubject,
+  allocateAcrossSpans,
   compareWithSyllabus,
+  getClosedDates,
+  getSessionRange,
+  hoursStatus,
+  WEEKDAYS,
+  type AllocationPeriod,
+  type AllocationSpan,
   getSubjectBySdm,
   getWorkingDayCounts,
+  listCalendarClosures,
   normalizeYearLevel,
   requiredHoursForDivision,
   type WeekDay,
@@ -57,6 +65,9 @@ interface TypeForPeriodsConfig {
 
 
 export default class TimeTableController {
+  /** Weekly timetable of a saved version, keyed by version id and last update, so unchanged snapshots are not re-read. */
+  private static weekCache = new Map<string, { day: WeekDay; periods: AllocationPeriod[] }[]>()
+
 
   async getTeacherTimetable(ctx: HttpContext) {
     const user = ctx.auth.user!
@@ -104,10 +115,17 @@ export default class TimeTableController {
       return ctx.response.badRequest({ message: 'academic_session_id is required' })
     }
 
-    // Return dummy projected availability for now to fix the frontend crashing
+    // Days the academic calendar has closed, so the teacher dashboard can stop logging on them. An entry
+    // for "All" closes everybody; one for a year level closes only that level's classes.
+    const closures = await listCalendarClosures(Number(academic_session_id))
+    const today = DateTime.now().toISODate()
+    const todayClosure = closures.find((c) => c.date === today && c.level === 'All')
+
     return ctx.response.json({
       projectedAvailablePeriods: {},
-      todayIsHoliday: false
+      todayIsHoliday: Boolean(todayClosure),
+      todayHolidayTitle: todayClosure?.title ?? null,
+      closures,
     })
   }
 
@@ -729,35 +747,31 @@ export default class TimeTableController {
       return ctx.response.badRequest({ message: 'Division not found' })
     }
 
-    // The weekly timetable must give every subject at least its syllabus hours for the session.
+    // The session this week belongs to (also used to keep the active version in step after the save)
     const firstDayConfig = days.length
       ? await ClassDayConfig.query().where('id', days[0].class_day_config_id).first()
       : null
     const timetableConfig = firstDayConfig
       ? await SchoolTimeTableConfig.query().where('id', firstDayConfig.school_timetable_config_id).first()
       : null
+
+    // Every subject must get at least its syllabus hours over the timetable history of the session: the saved
+    // versions count for the working days inside their own dates, this week replaces the active version.
     if (timetableConfig) {
-      const info = await this.loadSyllabusContext(
+      const result = await this.computeAllocation(
         Number(division_id),
         Number(timetableConfig.academic_year),
-        ctx.auth.user?.school_id
+        ctx.auth.user?.school_id,
+        days.map((d) => ({ class_day_config_id: Number(d.class_day_config_id), periods: d.periods as any[] }))
       )
-      if (info) {
-        const dayById = new Map(info.dayConfigs.map((c) => [Number(c.id), c.day]))
-        const week = days
-          .map((d) => ({ day: dayById.get(Number(d.class_day_config_id)), periods: d.periods }))
-          .filter((d): d is { day: WeekDay; periods: typeof d.periods } => !!d.day)
-        const allocated = allocatedHoursBySubject(week, info.counts, info.subjectBySdm)
-        const { under } = compareWithSyllabus(info.required, allocated)
-        if (under.length > 0) {
-          return ctx.response.badRequest({
-            code: 'SYLLABUS_HOURS_UNDER_ALLOCATED',
-            message:
-              'Allocated hours are below the syllabus hours for: ' +
-              under.map((s) => `${s.name} (${s.allocated.toFixed(1)}h of ${s.required.toFixed(1)}h)`).join(', '),
-            subjects: under,
-          })
-        }
+      if (result && result.under.length > 0) {
+        return ctx.response.badRequest({
+          code: 'SYLLABUS_HOURS_UNDER_ALLOCATED',
+          message:
+            'Allocated hours are below the syllabus hours for: ' +
+            result.under.map((s) => `${s.name} (${s.allocated.toFixed(1)}h of ${s.required.toFixed(1)}h)`).join(', '),
+          subjects: result.under,
+        })
       }
     }
 
@@ -1094,7 +1108,150 @@ export default class TimeTableController {
     )
     const subjectBySdm = await getSubjectBySdm(divisionId, academicYear)
     const required = await requiredHoursForDivision(subjectBySdm, academicYear, division.class_id, schoolId)
-    return { counts, isSaturdayWorking, subjectBySdm, required, dayConfigs }
+    return { counts, isSaturdayWorking, subjectBySdm, required, dayConfigs, yearLevel }
+  }
+
+  /** YYYY-MM-DD of a stored date (the driver returns a Date even though the model types it as a string). */
+  private dateKey(value: unknown): string | null {
+    if (!value) return null
+    const v: any = value
+    return (typeof v.toISOString === 'function' ? v.toISOString() : String(v)).slice(0, 10)
+  }
+
+  /** Weekly timetable (periods grouped by weekday) from stored periods, e.g. a version snapshot. */
+  private weekFromPeriods(periods: any[], dayById: Map<number, WeekDay>) {
+    const byDay = new Map<WeekDay, AllocationPeriod[]>()
+    for (const p of periods || []) {
+      const day = dayById.get(Number(p.class_day_config_id)) ?? p.day ?? p.period_config_class_day?.day
+      if (!day || !WEEKDAYS.includes(day)) continue
+      const list = byDay.get(day as WeekDay) || []
+      // only what the hours calculation reads, so the cache stays small
+      list.push({
+        start_time: p.start_time,
+        end_time: p.end_time,
+        is_break: p.is_break,
+        is_pt: p.is_pt,
+        is_free_period: p.is_free_period,
+        is_library: p.is_library,
+        is_seminar: p.is_seminar,
+        subjects_division_masters_id: p.subjects_division_masters_id,
+        batch_name: p.batch_name,
+      })
+      byDay.set(day as WeekDay, list)
+    }
+    return [...byDay].map(([day, dayPeriods]) => ({ day, periods: dayPeriods }))
+  }
+
+  /**
+   * Hours the timetable of a division gives each subject over the session, and how they compare with the
+   * syllabus. The timetable history is followed: every saved version counts for the working days inside its
+   * own dates; the active version is replaced by `liveDays` (the unsaved timetable being edited) when given.
+   */
+  private async computeAllocation(
+    divisionId: number,
+    academicYear: number,
+    schoolId?: number | null,
+    liveDays?: { class_day_config_id: number; periods: any[] }[]
+  ) {
+    const info = await this.loadSyllabusContext(divisionId, academicYear, schoolId)
+    if (!info) return null
+
+    const dayById = new Map<number, WeekDay>(info.dayConfigs.map((c) => [Number(c.id), c.day as WeekDay]))
+    const liveWeek = liveDays
+      ? this.weekFromPeriods(
+          liveDays.flatMap((d) => d.periods.map((p) => ({ ...p, class_day_config_id: d.class_day_config_id }))),
+          dayById
+        )
+      : null
+
+    // The snapshots are large (every period with its subject, teacher and lab), so only their dates are read
+    // here; the weekly timetable of a version is fetched only when it is not cached, and not at all for the
+    // active version when the timetable on screen replaces it.
+    const versions = await TimetableVersion.query()
+      .where('division_id', divisionId)
+      .andWhere('academic_year', academicYear)
+      .select('id', 'start_date', 'end_date', 'is_active', 'updated_at')
+      .orderBy('id', 'asc')
+
+    const cacheKey = (v: TimetableVersion) => `${v.id}:${v.updatedAt?.toMillis()}:${[...dayById].join(',')}`
+    const missing = versions.filter((v) => !(v.is_active && liveWeek) && !TimeTableController.weekCache.has(cacheKey(v)))
+    if (missing.length > 0) {
+      const rows = await TimetableVersion.query().whereIn('id', missing.map((v) => v.id)).select('id', 'version_data')
+      const dataById = new Map(rows.map((r) => [r.id, r.version_data]))
+      for (const v of missing) {
+        let parsed: any[] = []
+        try {
+          const raw = dataById.get(v.id)
+          parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw as any)
+        } catch {
+          parsed = []
+        }
+        if (TimeTableController.weekCache.size > 600) TimeTableController.weekCache.clear()
+        TimeTableController.weekCache.set(cacheKey(v), this.weekFromPeriods(Array.isArray(parsed) ? parsed : [], dayById))
+      }
+    }
+
+    const spans: AllocationSpan[] = []
+    for (const v of versions) {
+      const week: AllocationSpan['week'] =
+        v.is_active && liveWeek ? liveWeek : TimeTableController.weekCache.get(cacheKey(v)) || []
+      spans.push({
+        priority: Number(v.id),
+        start: this.dateKey(v.start_date),
+        end: this.dateKey(v.end_date),
+        week,
+      })
+    }
+
+    // A session with no saved versions runs on its live timetable for the whole session
+    if (versions.length === 0) {
+      const week =
+        liveWeek ?? this.weekFromPeriods((await this.loadLivePeriods(divisionId, academicYear)).map((p) => p.toJSON()), dayById)
+      if (week.length) spans.push({ priority: -1, start: null, end: null, week })
+    }
+
+    const range = await getSessionRange(academicYear)
+    const closed = await getClosedDates(academicYear, info.yearLevel)
+    const { allocated, spans: resolved } = allocateAcrossSpans(spans, range, closed, info.subjectBySdm)
+    const { under, over } = compareWithSyllabus(info.required, allocated)
+
+    const summary = [...info.required]
+      .filter(([, v]) => v.hours > 0 || v.nonLecture)
+      .map(([subject_id, v]) => {
+        const hours = allocated.get(subject_id) || 0
+        return {
+          subject_id,
+          name: v.name,
+          required: v.hours,
+          allocated: hours,
+          is_non_lecture: !!v.nonLecture,
+          status: hoursStatus(v.hours, hours),
+        }
+      })
+    return { info, allocated, under, over, summary, spans: resolved }
+  }
+
+  /** POST timetable/hours-check: running syllabus-hours total for a division, optionally for an unsaved week. */
+  async getHoursCheck(ctx: HttpContext) {
+    const divisionId = Number(ctx.request.input('division_id'))
+    const academicYear = Number(ctx.request.input('academic_session_id') || ctx.request.input('academic_year'))
+    if (!divisionId || !academicYear) {
+      return ctx.response.badRequest({ message: 'division_id and academic_session_id are required' })
+    }
+    const days = ctx.request.input('days')
+    const liveDays = Array.isArray(days)
+      ? days.map((d: any) => ({ class_day_config_id: Number(d.class_day_config_id), periods: Array.isArray(d.periods) ? d.periods : [] }))
+      : undefined
+
+    const result = await this.computeAllocation(divisionId, academicYear, ctx.auth.user?.school_id, liveDays)
+    if (!result) return ctx.response.badRequest({ message: 'Division not found' })
+
+    return ctx.response.ok({
+      summary: result.summary,
+      under: result.under,
+      over: result.over,
+      versions: result.spans,
+    })
   }
 
   async getSyllabusHours(ctx: HttpContext) {
