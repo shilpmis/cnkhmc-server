@@ -37,6 +37,7 @@ router.use([
   () => import('@adonisjs/session/session_middleware'),
   () => import('@adonisjs/auth/initialize_auth_middleware'),
   () => import('#middleware/initialize_bouncer_middleware'),
+  () => import('#middleware/daily_term_switch_middleware'),
   // () => import('#middleware/validate_query_middleware'),
   // () => import('#middleware/validate_academic_year_middleware')
 ])

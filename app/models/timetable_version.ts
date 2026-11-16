@@ -28,6 +28,10 @@ export default class TimetableVersion extends Base {
   @column()
   declare is_active: boolean
 
+  /** The term this version is the timetable of; null for a version saved by hand (history). */
+  @column()
+  declare term_id: number | null
+
   @column()
   declare created_by: number | null
 

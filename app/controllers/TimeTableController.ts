@@ -16,6 +16,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import SpacesService from '#services/SpacesService'
 import { DateTime } from 'luxon'
+import AcademicTerm from '#models/academic_term'
+import { applyVersionToLive, listTerms, dateOnly, todayKey, parseVersionPeriods } from '#services/timetable_terms'
+import StaffEnrollment from '#models/StaffEnrollment'
 import {
   activityTypesBySubject,
   getNonLectureTemplatesForClass,
@@ -514,6 +517,32 @@ export default class TimeTableController {
     console.log(`Requested Class ID: ${cls.id}, Configured Class IDs: ${configuredClasses.map(c => c.class_id).join(', ')}`);
     console.log(`Class Day Config details: ${JSON.stringify(school_timetable_config.class_day_config.map(c => ({ id: c.id, class_id: c.class_id, day: c.day } )))}`);
 
+    // A term's timetable is its own saved copy: show that instead of the live timetable
+    const termId = Number(ctx.request.input('term_id')) || null
+    if (termId) {
+      const version = await TimetableVersion.query()
+        .where('division_id', Number(division_id))
+        .andWhere('academic_year', Number(academic_session_id))
+        .andWhere('term_id', termId)
+        .first()
+      if (version) {
+        const periods = parseVersionPeriods(version)
+        const json: any = school_timetable_config.toJSON()
+        const dayIdByName = new Map<string, number>((json.class_day_config || []).map((d: any) => [d.day, Number(d.id)]))
+        for (const day of json.class_day_config || []) {
+          const { period_config: _live, ...dayWithoutPeriods } = day
+          day.period_config = periods
+            .filter((p) => Number(p.class_day_config_id ?? dayIdByName.get(p.day)) === Number(day.id))
+            .map((p) => ({
+              ...p,
+              division_id: Number(division_id),
+              period_config_class_day: { ...dayWithoutPeriods, class: cls.toJSON() },
+            }))
+        }
+        return ctx.response.json(json)
+      }
+    }
+
     return ctx.response.json(school_timetable_config)
   }
 
@@ -764,7 +793,8 @@ export default class TimeTableController {
         ctx.auth.user?.school_id,
         days.map((d) => ({ class_day_config_id: Number(d.class_day_config_id), periods: d.periods as any[] }))
       )
-      if (result && result.under.length > 0) {
+      // With terms configured the syllabus is only owed once every term has its timetable
+      if (result && result.termStatus.complete && result.under.length > 0) {
         return ctx.response.badRequest({
           code: 'SYLLABUS_HOURS_UNDER_ALLOCATED',
           message:
@@ -1151,7 +1181,8 @@ export default class TimeTableController {
     divisionId: number,
     academicYear: number,
     schoolId?: number | null,
-    liveDays?: { class_day_config_id: number; periods: any[] }[]
+    liveDays?: { class_day_config_id: number; periods: any[] }[],
+    editingTermId?: number
   ) {
     const info = await this.loadSyllabusContext(divisionId, academicYear, schoolId)
     if (!info) return null
@@ -1167,14 +1198,29 @@ export default class TimeTableController {
     // The snapshots are large (every period with its subject, teacher and lab), so only their dates are read
     // here; the weekly timetable of a version is fetched only when it is not cached, and not at all for the
     // active version when the timetable on screen replaces it.
-    const versions = await TimetableVersion.query()
+    // Terms of the class: when configured, the timetable of the session is the timetables of its terms.
+    const division = await Divisions.query().where('id', divisionId).first()
+    const terms = division ? await listTerms(division.class_id, academicYear) : []
+    const termIds = new Set(terms.map((t) => t.id))
+
+    const allVersions = await TimetableVersion.query()
       .where('division_id', divisionId)
       .andWhere('academic_year', academicYear)
-      .select('id', 'start_date', 'end_date', 'is_active', 'updated_at')
+      .select('id', 'start_date', 'end_date', 'is_active', 'term_id', 'updated_at')
       .orderBy('id', 'asc')
+    const versions = terms.length > 0 ? allVersions.filter((v) => v.term_id && termIds.has(v.term_id)) : allVersions
+
+    const termStatus = {
+      configured: terms.length,
+      covered: terms.filter((t) => versions.some((v) => v.term_id === t.id)).length,
+      missing: terms.filter((t) => !versions.some((v) => v.term_id === t.id)).map((t) => t.name),
+      complete: terms.length === 0 || terms.every((t) => versions.some((v) => v.term_id === t.id)),
+    }
 
     const cacheKey = (v: TimetableVersion) => `${v.id}:${v.updatedAt?.toMillis()}:${[...dayById].join(',')}`
-    const missing = versions.filter((v) => !(v.is_active && liveWeek) && !TimeTableController.weekCache.has(cacheKey(v)))
+    // The version the unsaved timetable on screen stands in for: the term being edited, else the live (active) one
+    const isEdited = (v: TimetableVersion) => (editingTermId ? v.term_id === editingTermId : !!v.is_active)
+    const missing = versions.filter((v) => !(isEdited(v) && liveWeek) && !TimeTableController.weekCache.has(cacheKey(v)))
     if (missing.length > 0) {
       const rows = await TimetableVersion.query().whereIn('id', missing.map((v) => v.id)).select('id', 'version_data')
       const dataById = new Map(rows.map((r) => [r.id, r.version_data]))
@@ -1194,7 +1240,7 @@ export default class TimeTableController {
     const spans: AllocationSpan[] = []
     for (const v of versions) {
       const week: AllocationSpan['week'] =
-        v.is_active && liveWeek ? liveWeek : TimeTableController.weekCache.get(cacheKey(v)) || []
+        isEdited(v) && liveWeek ? liveWeek : TimeTableController.weekCache.get(cacheKey(v)) || []
       spans.push({
         priority: Number(v.id),
         start: this.dateKey(v.start_date),
@@ -1204,7 +1250,7 @@ export default class TimeTableController {
     }
 
     // A session with no saved versions runs on its live timetable for the whole session
-    if (versions.length === 0) {
+    if (versions.length === 0 && terms.length === 0) {
       const week =
         liveWeek ?? this.weekFromPeriods((await this.loadLivePeriods(divisionId, academicYear)).map((p) => p.toJSON()), dayById)
       if (week.length) spans.push({ priority: -1, start: null, end: null, week })
@@ -1228,7 +1274,7 @@ export default class TimeTableController {
           status: hoursStatus(v.hours, hours),
         }
       })
-    return { info, allocated, under, over, summary, spans: resolved }
+    return { info, allocated, under, over, summary, spans: resolved, termStatus }
   }
 
   /** POST timetable/hours-check: running syllabus-hours total for a division, optionally for an unsaved week. */
@@ -1243,7 +1289,8 @@ export default class TimeTableController {
       ? days.map((d: any) => ({ class_day_config_id: Number(d.class_day_config_id), periods: Array.isArray(d.periods) ? d.periods : [] }))
       : undefined
 
-    const result = await this.computeAllocation(divisionId, academicYear, ctx.auth.user?.school_id, liveDays)
+    const termId = Number(ctx.request.input('term_id')) || undefined
+    const result = await this.computeAllocation(divisionId, academicYear, ctx.auth.user?.school_id, liveDays, termId)
     if (!result) return ctx.response.badRequest({ message: 'Division not found' })
 
     return ctx.response.ok({
@@ -1251,6 +1298,7 @@ export default class TimeTableController {
       under: result.under,
       over: result.over,
       versions: result.spans,
+      terms: result.termStatus,
     })
   }
 
@@ -1425,94 +1473,447 @@ export default class TimeTableController {
       return ctx.response.notFound({ message: 'Timetable version not found' });
     }
 
-    let rawData = version.version_data;
-    let periods: any[] = [];
     try {
-      periods = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-    } catch (e) {
-      return ctx.response.badRequest({ message: 'Invalid version snapshot data' });
-    }
-
-    const division = await Divisions.query().where('id', version.division_id).first();
-    if (!division) {
-      return ctx.response.badRequest({ message: 'Associated division not found' });
-    }
-
-    const schoolConfig = await SchoolTimeTableConfig.query().where('academic_year', version.academic_year).first();
-    if (!schoolConfig) {
-      return ctx.response.badRequest({ message: 'School timetable config not found for this academic session' });
-    }
-
-    const dayConfigs = await ClassDayConfig.query()
-      .where('school_timetable_config_id', schoolConfig.id)
-      .andWhere('class_id', division.class_id);
-
-    const dayConfigMap = new Map<string, number>();
-    const dayConfigIdSet = new Set(dayConfigs.map(d => d.id));
-    dayConfigs.forEach(d => dayConfigMap.set(d.day, d.id));
-
-    const trx = await db.transaction();
-    try {
-      // Clear current periods for this division
-      await PeriodsConfig.query()
-        .where('division_id', version.division_id)
-        .whereIn('class_day_config_id', Array.from(dayConfigIdSet))
-        .useTransaction(trx)
-        .delete();
-
-      // Restore periods
-      const createdPeriods: PeriodsConfig[] = [];
-      for (const p of periods) {
-        let classDayConfigId = p.class_day_config_id;
-        if (!classDayConfigId || !dayConfigIdSet.has(classDayConfigId)) {
-          if (p.day && dayConfigMap.has(p.day)) {
-            classDayConfigId = dayConfigMap.get(p.day)!;
-          } else if (p.period_config_class_day?.day && dayConfigMap.has(p.period_config_class_day.day)) {
-            classDayConfigId = dayConfigMap.get(p.period_config_class_day.day)!;
-          }
-        }
-
-        if (classDayConfigId && dayConfigIdSet.has(classDayConfigId)) {
-          const newPeriod = await PeriodsConfig.create({
-            class_day_config_id: classDayConfigId,
-            division_id: version.division_id,
-            period_order: p.period_order,
-            start_time: p.start_time,
-            end_time: p.end_time,
-            is_break: !!p.is_break,
-            subjects_division_masters_id: p.subjects_division_masters_id || null,
-            staff_enrollment_id: p.staff_enrollment_id || null,
-            lab_id: p.lab_id || null,
-            is_pt: !!p.is_pt,
-            is_free_period: !!p.is_free_period,
-            is_library: !!p.is_library,
-            is_seminar: !!p.is_seminar,
-            batch_name: p.batch_name || null,
-          }, { client: trx });
-          createdPeriods.push(newPeriod);
-        }
-      }
-
-      // Mark this version as active, others as inactive
-      await TimetableVersion.query()
-        .where('division_id', version.division_id)
-        .andWhere('academic_year', version.academic_year)
-        .useTransaction(trx)
-        .update({ is_active: false });
-
-      version.is_active = true;
-      await version.useTransaction(trx).save();
-
-      await trx.commit();
-
+      const restored = await applyVersionToLive(version);
       return ctx.response.ok({
-        message: `Restored ${version.version_name || 'timetable version'} successfully (${createdPeriods.length} periods restored)`,
+        message: `Restored ${version.version_name || 'timetable version'} successfully (${restored} periods restored)`,
         version
       });
     } catch (error: any) {
-      await trx.rollback();
       console.error('Error restoring timetable version:', error);
       return ctx.response.badRequest({ message: 'Failed to restore timetable version: ' + (error.message || 'Unknown error') });
+    }
+  }
+
+  /** GET timetable/terms?class_id=&academic_year=&division_id= : the terms of a class, and which have a timetable. */
+  async getTerms(ctx: HttpContext) {
+    const classId = Number(ctx.request.input('class_id'))
+    const academicYear = Number(ctx.request.input('academic_session_id') || ctx.request.input('academic_year'))
+    const divisionId = Number(ctx.request.input('division_id')) || null
+    if (!classId || !academicYear) {
+      return ctx.response.badRequest({ message: 'class_id and academic_session_id are required' })
+    }
+
+    const terms = await listTerms(classId, academicYear)
+    const versions = divisionId
+      ? await TimetableVersion.query()
+          .where('division_id', divisionId)
+          .andWhere('academic_year', academicYear)
+          .whereNotNull('term_id')
+          .select('id', 'term_id', 'is_active')
+      : []
+    const today = todayKey()
+    return ctx.response.ok(
+      terms.map((t) => {
+        const v = versions.find((x) => x.term_id === t.id)
+        const start = dateOnly(t.start_date)!
+        const end = dateOnly(t.end_date)!
+        return {
+          id: t.id,
+          term_number: t.term_number,
+          name: t.name,
+          start_date: start,
+          end_date: end,
+          is_current: start <= today && today <= end,
+          version_id: v?.id ?? null,
+          has_timetable: !!v,
+          is_active: !!v?.is_active,
+        }
+      })
+    )
+  }
+
+  /**
+   * POST timetable/terms: replaces the terms of a class for a session with the given list
+   * { class_id, academic_session_id, terms: [{ name, start_date, end_date }] }, in term order.
+   */
+  async saveTerms(ctx: HttpContext) {
+    const classId = Number(ctx.request.input('class_id'))
+    const academicYear = Number(ctx.request.input('academic_session_id') || ctx.request.input('academic_year'))
+    const input = ctx.request.input('terms')
+    if (!classId || !academicYear || !Array.isArray(input) || input.length === 0) {
+      return ctx.response.badRequest({ message: 'class_id, academic_session_id and at least one term are required' })
+    }
+    if (input.length > 12) return ctx.response.badRequest({ message: 'At most 12 terms are allowed' })
+
+    const terms = input.map((t: any, i: number) => ({
+      term_number: i + 1,
+      name: String(t.name || '').trim() || `Term ${i + 1}`,
+      start_date: dateOnly(t.start_date),
+      end_date: dateOnly(t.end_date),
+    }))
+    for (const t of terms) {
+      if (!t.start_date || !t.end_date) {
+        return ctx.response.badRequest({ message: `${t.name}: start date and end date are required` })
+      }
+      if (t.start_date > t.end_date) {
+        return ctx.response.badRequest({ message: `${t.name}: the end date is before the start date` })
+      }
+    }
+    for (let i = 1; i < terms.length; i++) {
+      if (terms[i].start_date! <= terms[i - 1].end_date!) {
+        return ctx.response.badRequest({
+          message: `${terms[i].name} must start after ${terms[i - 1].name} ends (terms cannot overlap)`,
+        })
+      }
+    }
+
+    const trx = await db.transaction()
+    try {
+      const existing = await AcademicTerm.query()
+        .where('class_id', classId)
+        .andWhere('academic_year', academicYear)
+        .useTransaction(trx)
+      const byNumber = new Map(existing.map((e) => [e.term_number, e]))
+
+      for (const t of terms) {
+        const row = byNumber.get(t.term_number)
+        if (row) {
+          row.merge({ name: t.name, start_date: t.start_date!, end_date: t.end_date! })
+          await row.useTransaction(trx).save()
+        } else {
+          await AcademicTerm.create(
+            { academic_year: academicYear, class_id: classId, term_number: t.term_number, name: t.name, start_date: t.start_date!, end_date: t.end_date! },
+            { client: trx }
+          )
+        }
+      }
+
+      // Terms that were dropped: their timetables stay as history but stop being a term's timetable
+      const dropped = existing.filter((e) => e.term_number > terms.length)
+      if (dropped.length > 0) {
+        await TimetableVersion.query()
+          .whereIn('term_id', dropped.map((d) => d.id))
+          .useTransaction(trx)
+          .update({ term_id: null })
+        await AcademicTerm.query().whereIn('id', dropped.map((d) => d.id)).useTransaction(trx).delete()
+      }
+
+      // The timetable of a term runs on the term's dates
+      const saved = await AcademicTerm.query()
+        .where('class_id', classId)
+        .andWhere('academic_year', academicYear)
+        .useTransaction(trx)
+      for (const term of saved) {
+        await TimetableVersion.query()
+          .where('term_id', term.id)
+          .useTransaction(trx)
+          .update({ start_date: dateOnly(term.start_date), end_date: dateOnly(term.end_date), version_name: term.name })
+      }
+
+      await trx.commit()
+    } catch (error: any) {
+      await trx.rollback()
+      console.error('Error saving terms:', error)
+      return ctx.response.badRequest({ message: 'Failed to save terms: ' + (error.message || 'Unknown error') })
+    }
+
+    return this.getTerms(ctx)
+  }
+
+  /**
+   * POST timetable/terms/activate { division_id, term_id }: opens a term's timetable for editing. The term's
+   * saved copy is what gets edited, so this never changes what the other users see. A term without a copy yet
+   * starts as a copy of the previous term's timetable (or of the live one for the first term). When the term is
+   * the one running today the copy becomes the live timetable.
+   */
+  async activateTerm(ctx: HttpContext) {
+    const divisionId = Number(ctx.request.input('division_id'))
+    const termId = Number(ctx.request.input('term_id'))
+    const term = termId ? await AcademicTerm.find(termId) : null
+    const division = divisionId ? await Divisions.query().where('id', divisionId).first() : null
+    if (!term || !division || division.class_id !== term.class_id) {
+      return ctx.response.badRequest({ message: 'Division and term must belong to the same class' })
+    }
+
+    try {
+      let version = await TimetableVersion.query()
+        .where('division_id', divisionId)
+        .andWhere('academic_year', term.academic_year)
+        .andWhere('term_id', term.id)
+        .first()
+      let created = false
+
+      if (!version) {
+        await this.syncActiveVersion(divisionId, term.academic_year)
+
+        const earlier = await listTerms(term.class_id, term.academic_year)
+        let source: any[] | null = null
+        for (const t of earlier.filter((x) => x.term_number < term.term_number).reverse()) {
+          const prev = await TimetableVersion.query()
+            .where('division_id', divisionId)
+            .andWhere('academic_year', term.academic_year)
+            .andWhere('term_id', t.id)
+            .first()
+          if (prev) {
+            source = parseVersionPeriods(prev)
+            break
+          }
+        }
+        if (!source) {
+          source = (await this.loadLivePeriods(divisionId, term.academic_year)).map((p) => p.toJSON())
+        }
+
+        version = await TimetableVersion.create({
+          division_id: divisionId,
+          academic_year: term.academic_year,
+          term_id: term.id,
+          version_name: term.name,
+          start_date: dateOnly(term.start_date),
+          end_date: dateOnly(term.end_date),
+          is_active: false,
+          created_by: ctx.auth.user?.id || null,
+          version_data: JSON.stringify(source),
+        })
+        created = true
+      }
+
+      const today = todayKey()
+      const isCurrent = dateOnly(term.start_date)! <= today && today <= dateOnly(term.end_date)!
+      if (created && isCurrent) await applyVersionToLive(version)
+
+      return ctx.response.ok({ message: `${term.name} timetable is ready`, version_id: version.id, created })
+    } catch (error: any) {
+      console.error('Error opening term:', error)
+      return ctx.response.badRequest({ message: 'Failed to open the term timetable: ' + (error.message || 'Unknown error') })
+    }
+  }
+
+  /**
+   * POST timetable/terms/make-live { division_id, term_id }: puts a term's saved timetable on the live timetable
+   * now, whatever today's date. The daily switch still moves the division to today's term on the next day.
+   */
+  async makeTermLive(ctx: HttpContext) {
+    const divisionId = Number(ctx.request.input('division_id'))
+    const termId = Number(ctx.request.input('term_id'))
+    const term = termId ? await AcademicTerm.find(termId) : null
+    const division = divisionId ? await Divisions.query().where('id', divisionId).first() : null
+    if (!term || !division || division.class_id !== term.class_id) {
+      return ctx.response.badRequest({ message: 'Division and term must belong to the same class' })
+    }
+
+    const version = await TimetableVersion.query()
+      .where('division_id', divisionId)
+      .andWhere('academic_year', term.academic_year)
+      .andWhere('term_id', term.id)
+      .first()
+    if (!version) return ctx.response.badRequest({ message: `${term.name} has no timetable yet` })
+
+    try {
+      await applyVersionToLive(version)
+      return ctx.response.ok({ message: `${term.name} timetable is now live` })
+    } catch (error: any) {
+      console.error('Error making term live:', error)
+      return ctx.response.badRequest({ message: 'Failed to make the term live: ' + (error.message || 'Unknown error') })
+    }
+  }
+
+  /**
+   * Periods of the other divisions that run during a term, in the shape the teacher and lab clash checks read.
+   * A division whose class has terms contributes the saved timetable of every term overlapping these dates; any
+   * other division runs on its live timetable. With `includeOwn` the division's own saved copy is added too.
+   */
+  private async termClashPool(divisionId: number, term: AcademicTerm, includeOwn = false): Promise<PeriodsConfig[]> {
+    const year = term.academic_year
+    const start = dateOnly(term.start_date)!
+    const end = dateOnly(term.end_date)!
+    const yearTerms = await AcademicTerm.query().where('academic_year', year)
+    const overlapping = yearTerms.filter((t) => dateOnly(t.start_date)! <= end && dateOnly(t.end_date)! >= start)
+    const classesWithTerms = [...new Set(yearTerms.map((t) => t.class_id))]
+    const pool: any[] = []
+
+    if (overlapping.length > 0) {
+      const versions = await TimetableVersion.query()
+        .whereIn('term_id', overlapping.map((t) => t.id))
+        .if(!includeOwn, (q) => q.whereNot('division_id', divisionId))
+        .if(includeOwn, (q) => q.where((w) => w.whereNot('division_id', divisionId).orWhere('term_id', term.id)))
+      for (const v of versions) {
+        for (const p of parseVersionPeriods(v)) pool.push({ ...p, division_id: v.division_id })
+      }
+    }
+
+    const schoolConfig = await SchoolTimeTableConfig.query().where('academic_year', year).first()
+    if (schoolConfig) {
+      const dayConfigs = await ClassDayConfig.query().where('school_timetable_config_id', schoolConfig.id)
+      const termDivisionIds =
+        classesWithTerms.length > 0
+          ? (await Divisions.query().whereIn('class_id', classesWithTerms).select('id')).map((d) => d.id)
+          : []
+      const live = await PeriodsConfig.query()
+        .whereIn('class_day_config_id', dayConfigs.map((c) => c.id))
+        .whereNot('division_id', divisionId)
+        .if(termDivisionIds.length > 0, (q) => q.whereNotIn('division_id', termDivisionIds))
+      for (const p of live) pool.push(p.toJSON())
+    }
+
+    // names for the conflict message ("Class/Year 2nd BHMS Div A")
+    const divisionIds = [...new Set(pool.map((p) => Number(p.division_id)))]
+    const divisions = divisionIds.length > 0 ? await Divisions.query().whereIn('id', divisionIds).preload('class') : []
+    const byId = new Map(divisions.map((d) => [Number(d.id), d]))
+    return pool.map((p, i) => {
+      const d = byId.get(Number(p.division_id))
+      return {
+        ...p,
+        id: -(i + 1), // never equal to a real period id, so no pool entry is mistaken for the period being checked
+        division: d ? { division: d.division } : undefined,
+        period_config_class_day: d?.class ? { class: { class: d.class.class } } : undefined,
+      }
+    }) as unknown as PeriodsConfig[]
+  }
+
+  /**
+   * PUT timetable/term/week { division_id, term_id, days }: saves the week being edited into the term's own saved
+   * timetable, with the same checks as the live save. The live timetable is only replaced when this term is the
+   * one running today (or already live), so editing another term cannot change what anyone else sees.
+   */
+  async saveTermWeek(ctx: HttpContext) {
+    const { division_id, days } = await UpdateValidatorForPeriodConfigWeek.validate(ctx.request.all())
+    const termId = Number(ctx.request.input('term_id'))
+    const term = termId ? await AcademicTerm.find(termId) : null
+    const division = division_id ? await Divisions.query().where('id', division_id).first() : null
+    if (!term || !division || division.class_id !== term.class_id) {
+      return ctx.response.badRequest({ message: 'Division and term must belong to the same class' })
+    }
+
+    const version = await TimetableVersion.query()
+      .where('division_id', division.id)
+      .andWhere('academic_year', term.academic_year)
+      .andWhere('term_id', term.id)
+      .first()
+    if (!version) return ctx.response.badRequest({ message: 'Open the term first: it has no timetable yet' })
+
+    const schoolConfig = await SchoolTimeTableConfig.query().where('academic_year', term.academic_year).first()
+    if (!schoolConfig) return ctx.response.badRequest({ message: 'School Time Table Config not found' })
+
+    const dayConfigs = await ClassDayConfig.query()
+      .where('school_timetable_config_id', schoolConfig.id)
+      .andWhere('class_id', division.class_id)
+    const dayConfigById = new Map(dayConfigs.map((d) => [Number(d.id), d]))
+    for (const d of days) {
+      if (!dayConfigById.has(Number(d.class_day_config_id))) {
+        return ctx.response.badRequest({ message: `Class Day Config ${d.class_day_config_id} not found` })
+      }
+    }
+
+    // Syllabus hours across all terms: this term counts with the week on screen
+    const result = await this.computeAllocation(
+      division.id,
+      term.academic_year,
+      ctx.auth.user?.school_id,
+      days.map((d) => ({ class_day_config_id: Number(d.class_day_config_id), periods: d.periods as any[] })),
+      term.id
+    )
+    if (result && result.termStatus.complete && result.under.length > 0) {
+      return ctx.response.badRequest({
+        code: 'SYLLABUS_HOURS_UNDER_ALLOCATED',
+        message:
+          'Allocated hours are below the syllabus hours for: ' +
+          result.under.map((s) => `${s.name} (${s.allocated.toFixed(1)}h of ${s.required.toFixed(1)}h)`).join(', '),
+        subjects: result.under,
+      })
+    }
+
+    const existing = parseVersionPeriods(version)
+    const dayIdByName = new Map(dayConfigs.map((d) => [d.day, Number(d.id)]))
+    const periodDayId = (p: any) => Number(p.class_day_config_id ?? dayIdByName.get(p.day))
+    const editedDayIds = new Set(days.map((d) => Number(d.class_day_config_id)))
+    const retained = existing.filter((p) => !editedDayIds.has(periodDayId(p)))
+    const existingById = new Map(existing.map((p) => [Number(p.id), p]))
+    let nextId = existing.reduce((m, p) => Math.max(m, Number(p.id) || 0), 0)
+
+    // The clash checks read the other divisions' timetables of the same dates, plus what this division keeps
+    const pool = await this.termClashPool(division.id, term)
+    let poolSeq = pool.length + 1
+    const addToPool = (p: any) => pool.push({ ...p, id: -(poolSeq++) } as unknown as PeriodsConfig)
+    for (const p of retained) addToPool({ ...p, class_day_config_id: periodDayId(p), division_id: division.id })
+
+    const built: any[] = []
+    try {
+      for (const day of days) {
+        const dayConfig = dayConfigById.get(Number(day.class_day_config_id))!
+        for (let i = 0; i < day.periods.length; i++) {
+          const incoming = day.periods[i]
+          const previous = incoming.id ? existingById.get(Number(incoming.id)) : undefined
+          const merged: any = {
+            ...(previous || {}),
+            class_day_config_id: Number(day.class_day_config_id),
+            division_id: division.id,
+            period_order: incoming.period_order,
+            start_time: incoming.start_time ?? previous?.start_time ?? null,
+            end_time: incoming.end_time ?? previous?.end_time ?? null,
+            is_break: incoming.is_break ?? previous?.is_break ?? false,
+            subjects_division_masters_id: incoming.subjects_division_masters_id ?? (incoming.subjects_division_masters_id === null ? null : previous?.subjects_division_masters_id ?? null),
+            staff_enrollment_id: incoming.staff_enrollment_id ?? (incoming.staff_enrollment_id === null ? null : previous?.staff_enrollment_id ?? null),
+            lab_id: incoming.lab_id ?? (incoming.lab_id === null ? null : previous?.lab_id ?? null),
+            is_pt: incoming.is_pt ?? previous?.is_pt ?? false,
+            is_free_period: incoming.is_free_period ?? previous?.is_free_period ?? false,
+            is_library: incoming.is_library ?? previous?.is_library ?? false,
+            is_seminar: incoming.is_seminar ?? previous?.is_seminar ?? false,
+            batch_name: incoming.batch_name ?? (incoming.batch_name === null ? null : previous?.batch_name ?? null),
+          }
+          if (merged.is_break) {
+            Object.assign(merged, {
+              subjects_division_masters_id: null,
+              staff_enrollment_id: null,
+              lab_id: null,
+              is_pt: false,
+              is_free_period: false,
+              is_library: false,
+              is_seminar: false,
+              batch_name: null,
+            })
+          }
+          delete merged.id
+
+          if (!merged.is_break && !merged.is_pt && !merged.is_free_period && !merged.is_library && !merged.is_seminar) {
+            if (merged.staff_enrollment_id) {
+              const teacher = await this.checkTeacherAvailability(merged, dayConfig, schoolConfig, undefined, undefined, pool)
+              if (!teacher.result) {
+                return ctx.response.badRequest({ message: `Day ${dayConfig.day} Period ${i + 1}: ${teacher.message}` })
+              }
+            }
+            if (merged.lab_id) {
+              const lab = await this.checklabAvailability(merged, dayConfig, schoolConfig, undefined, undefined, pool)
+              if (!lab.result) {
+                return ctx.response.badRequest({ message: `Day ${dayConfig.day} Period ${i + 1}: ${lab.message}` })
+              }
+            }
+          }
+
+          addToPool(merged)
+          built.push({ ...merged, id: previous ? Number(previous.id) : ++nextId })
+        }
+      }
+
+      // Names shown by the timetable screens, as a live period carries them
+      const ids = (key: string) => [...new Set(built.map((p) => p[key]).filter(Boolean).map(Number))]
+      const sdmIds = ids('subjects_division_masters_id')
+      const staffIds = ids('staff_enrollment_id')
+      const labIds = ids('lab_id')
+      const sdms = sdmIds.length ? await SubjectDivisionMaster.query().whereIn('id', sdmIds).preload('subject') : []
+      const enrollments = staffIds.length ? await StaffEnrollment.query().whereIn('id', staffIds).preload('staff') : []
+      const labs = labIds.length ? await LabConfig.query().whereIn('id', labIds) : []
+      const sdmById = new Map(sdms.map((r) => [Number(r.id), r.toJSON()]))
+      const enrollmentById = new Map(enrollments.map((r) => [Number(r.id), r.toJSON()]))
+      const labById = new Map(labs.map((r) => [Number(r.id), r.toJSON()]))
+      for (const p of built) {
+        p.period_config_subject = p.subjects_division_masters_id ? sdmById.get(Number(p.subjects_division_masters_id)) ?? null : null
+        p.staff_enrollment = p.staff_enrollment_id ? enrollmentById.get(Number(p.staff_enrollment_id)) ?? null : null
+        p.lab = p.lab_id ? labById.get(Number(p.lab_id)) ?? null : null
+      }
+
+      version.version_data = JSON.stringify([...retained, ...built])
+      await version.save()
+
+      const today = todayKey()
+      const isCurrent = dateOnly(term.start_date)! <= today && today <= dateOnly(term.end_date)!
+      const appliedToLive = isCurrent || !!version.is_active
+      if (appliedToLive) await applyVersionToLive(version)
+
+      return ctx.response.ok({ message: 'Term timetable saved', applied_to_live: appliedToLive })
+    } catch (error: any) {
+      console.error('Save term week error:', error)
+      return ctx.response.badRequest({ message: 'Error updating term timetable: ' + (error.message || 'Unknown error') })
     }
   }
 
@@ -1583,7 +1984,12 @@ export default class TimeTableController {
     }
 
     // Now check if the teacher is available for this period
-    let result = await this.checkTeacherAvailability(payload, class_day_config, school_timetable_config)
+    // Editing a term: compare with the other divisions' timetables of the term's dates, not the live ones
+    const termId = Number(ctx.request.input('term_id')) || null
+    const term = termId ? await AcademicTerm.find(termId) : null
+    const pool = term && payload.division_id ? await this.termClashPool(Number(payload.division_id), term, true) : undefined
+
+    let result = await this.checkTeacherAvailability(payload, class_day_config, school_timetable_config, undefined, undefined, pool)
     if (result.result === false) {
       return ctx.response.badRequest({
         code: result.status,
@@ -1594,7 +2000,7 @@ export default class TimeTableController {
 
     // 3 . lab availability
     if (payload.lab_id) {
-      let lab_result = await this.checklabAvailability(payload, class_day_config, school_timetable_config)
+      let lab_result = await this.checklabAvailability(payload, class_day_config, school_timetable_config, undefined, undefined, pool)
       if (lab_result.result === false) {
         return ctx.response.badRequest({
           code: lab_result.status,
