@@ -784,27 +784,6 @@ export default class TimeTableController {
       ? await SchoolTimeTableConfig.query().where('id', firstDayConfig.school_timetable_config_id).first()
       : null
 
-    // Every subject must get at least its syllabus hours over the timetable history of the session: the saved
-    // versions count for the working days inside their own dates, this week replaces the active version.
-    if (timetableConfig) {
-      const result = await this.computeAllocation(
-        Number(division_id),
-        Number(timetableConfig.academic_year),
-        ctx.auth.user?.school_id,
-        days.map((d) => ({ class_day_config_id: Number(d.class_day_config_id), periods: d.periods as any[] }))
-      )
-      // With terms configured the syllabus is only owed once every term has its timetable
-      if (result && result.termStatus.complete && result.under.length > 0) {
-        return ctx.response.badRequest({
-          code: 'SYLLABUS_HOURS_UNDER_ALLOCATED',
-          message:
-            'Allocated hours are below the syllabus hours for: ' +
-            result.under.map((s) => `${s.name} (${s.allocated.toFixed(1)}h of ${s.required.toFixed(1)}h)`).join(', '),
-          subjects: result.under,
-        })
-      }
-    }
-
     let trx = await db.transaction()
     let res: PeriodsConfig[] = []
 
@@ -1534,7 +1513,6 @@ export default class TimeTableController {
     if (!classId || !academicYear || !Array.isArray(input) || input.length === 0) {
       return ctx.response.badRequest({ message: 'class_id, academic_session_id and at least one term are required' })
     }
-    if (input.length > 12) return ctx.response.badRequest({ message: 'At most 12 terms are allowed' })
 
     const terms = input.map((t: any, i: number) => ({
       term_number: i + 1,
@@ -1793,24 +1771,6 @@ export default class TimeTableController {
       if (!dayConfigById.has(Number(d.class_day_config_id))) {
         return ctx.response.badRequest({ message: `Class Day Config ${d.class_day_config_id} not found` })
       }
-    }
-
-    // Syllabus hours across all terms: this term counts with the week on screen
-    const result = await this.computeAllocation(
-      division.id,
-      term.academic_year,
-      ctx.auth.user?.school_id,
-      days.map((d) => ({ class_day_config_id: Number(d.class_day_config_id), periods: d.periods as any[] })),
-      term.id
-    )
-    if (result && result.termStatus.complete && result.under.length > 0) {
-      return ctx.response.badRequest({
-        code: 'SYLLABUS_HOURS_UNDER_ALLOCATED',
-        message:
-          'Allocated hours are below the syllabus hours for: ' +
-          result.under.map((s) => `${s.name} (${s.allocated.toFixed(1)}h of ${s.required.toFixed(1)}h)`).join(', '),
-        subjects: result.under,
-      })
     }
 
     const existing = parseVersionPeriods(version)
@@ -2116,9 +2076,9 @@ export default class TimeTableController {
       }
     }
 
-    // 2. Check for max periods per day
-    const maxPerDay = school_timetable_config.teacher_max_periods_per_day || 5;
-    if (periods.length >= maxPerDay) {
+    // 2. Check for max periods per day (an empty setting means no limit)
+    const maxPerDay = Number(school_timetable_config.teacher_max_periods_per_day) || 0;
+    if (maxPerDay > 0 && periods.length >= maxPerDay) {
       return {
         result: false,
         status: 'PERIODS_LIMIT_FOR_TEACHER_EXCEEDED_FOR_DAY',
@@ -2126,7 +2086,16 @@ export default class TimeTableController {
       }
     }
 
-    // 3. Check for max periods per week
+    // 3. Check for max periods per week (an empty setting means no limit, so nothing is counted)
+    const maxPerWeek = Number(school_timetable_config.teacher_max_periods_per_week) || 0;
+    if (maxPerWeek <= 0) {
+      return {
+        result: true,
+        status: 'TEACHER_AVAILABLE',
+        message: 'Teacher is available for this period.'
+      };
+    }
+
     let weekConfigIds = cachedWeekConfigIds;
     if (!weekConfigIds) {
       const allClassDayConfigs = await ClassDayConfig.query()
@@ -2145,7 +2114,6 @@ export default class TimeTableController {
           .whereIn('class_day_config_id', weekConfigIds)
           .count('* as total'))[0].$extras.total);
 
-    const maxPerWeek = school_timetable_config.teacher_max_periods_per_week || 16;
     if (periodsForWeekCount >= maxPerWeek) {
       return {
         result: false,
