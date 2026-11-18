@@ -2762,6 +2762,38 @@ export default class TimeTableController {
       return ctx.response.notFound({ message: 'No timetable configuration found for this class and division.' })
     }
 
+    // The term printed on the sheet: the one asked for, else the one running today. A requested term prints its
+    // own saved timetable instead of the live one.
+    const requestedTermId = Number(ctx.request.input('term_id')) || null
+    const classTerms = await listTerms(division.class_id, Number(academic_session_id))
+    const today = todayKey()
+    const printedTerm =
+      (requestedTermId ? classTerms.find((t) => Number(t.id) === requestedTermId) : null) ||
+      classTerms.find((t) => dateOnly(t.start_date)! <= today && today <= dateOnly(t.end_date)!) ||
+      null
+    if (requestedTermId && printedTerm) {
+      const termVersion = await TimetableVersion.query()
+        .where('division_id', Number(division_id))
+        .andWhere('academic_year', Number(academic_session_id))
+        .andWhere('term_id', printedTerm.id)
+        .first()
+      if (termVersion) {
+        const snapshot = parseVersionPeriods(termVersion)
+        const dayIdByName = new Map<string, number>(
+          (school_timetable_config.class_day_config || []).map((d) => [d.day, Number(d.id)])
+        )
+        for (const day of school_timetable_config.class_day_config || []) {
+          ;(day as any).period_config = snapshot.filter(
+            (p) => Number(p.class_day_config_id ?? dayIdByName.get(p.day)) === Number(day.id)
+          )
+        }
+      }
+    }
+    const showDate = (value: unknown) => {
+      const d = dateOnly(value)
+      return d ? DateTime.fromISO(d).toFormat('dd LLL yyyy') : ''
+    }
+
     // Activity type of each non-lecture subject (e.g. "Seminar"), printed under the subject name
     const activityTypes = activityTypesBySubject(
       await getNonLectureTemplatesForClass(division.class_id, Number(academic_session_id), ctx.auth.user?.school_id)
@@ -2832,7 +2864,7 @@ export default class TimeTableController {
         }
 
         const cellContent: any[] = []
-        let fillColor = '#f8fafc'
+        let fillColor = '#ffffff'
 
         matchingPeriods.forEach((period, idx) => {
           if (idx > 0) {
@@ -2845,19 +2877,19 @@ export default class TimeTableController {
           }
 
           if (period.is_break) {
-            fillColor = '#fef3c7'
+            fillColor = '#ffffff'
             cellContent.push({ text: 'BREAK', style: 'breakText', alignment: 'center', bold: true })
           } else if (period.is_library) {
-            fillColor = '#e0f2fe'
+            fillColor = '#ffffff'
             cellContent.push({ text: 'LIBRARY', style: 'libraryText', alignment: 'center', bold: true })
           } else if (period.is_seminar) {
-            fillColor = '#f3e8ff'
+            fillColor = '#ffffff'
             cellContent.push({ text: 'SEMINAR', style: 'seminarText', alignment: 'center', bold: true })
           } else if (period.is_pt) {
-            fillColor = '#f3e8ff'
+            fillColor = '#ffffff'
             cellContent.push({ text: 'PT', style: 'ptText', alignment: 'center', bold: true })
           } else if (period.is_free_period) {
-            fillColor = '#f1f5f9'
+            fillColor = '#ffffff'
             cellContent.push({ text: 'FREE', style: 'freeText', alignment: 'center', bold: true })
           } else {
             if (period.batch_name) {
@@ -2885,9 +2917,9 @@ export default class TimeTableController {
               if (lab) {
                 cellContent.push({ text: `Lab: ${lab.name}`, style: 'labText', alignment: 'center', margin: [0, 1, 0, 0] })
               }
-              fillColor = '#dbeafe'
+              fillColor = '#ffffff'
             } else {
-              fillColor = '#dcfce7'
+              fillColor = '#ffffff'
             }
           }
         })
@@ -2964,9 +2996,13 @@ export default class TimeTableController {
                     { text: 'Class: ', bold: true },
                     { text: `Class ${classRow?.class || ''}` },
                     { text: '   |   ', color: '#cbd5e1' },
-                    { text: 'Division: ', bold: true },
-                    { text: `${division?.division || ''} ${division?.aliases ? `(${division.aliases})` : ''}` },
-                    { text: '   |   ', color: '#cbd5e1' },
+                    ...(printedTerm
+                      ? [
+                          { text: 'Term: ', bold: true },
+                          { text: `${printedTerm.name} (${showDate(printedTerm.start_date)} to ${showDate(printedTerm.end_date)})` },
+                          { text: '   |   ', color: '#cbd5e1' },
+                        ]
+                      : []),
                     { text: 'Academic Year: ', bold: true },
                     { text: `${academic_session_id || ''}` }
                   ],
@@ -3006,7 +3042,7 @@ export default class TimeTableController {
         collegeTitle:    { fontSize: 12, bold: true, color: '#1e293b' },
         collegeAmpersand:{ fontSize: 10, bold: true, color: '#1e293b' },
         detailsSubject:  { fontSize: 10, bold: true, color: '#1e293b' },
-        tableHeader:     { bold: true, fontSize: 8, color: '#0f172a', fillColor: '#f1f5f9' },
+        tableHeader:     { bold: true, fontSize: 8, color: '#0f172a', fillColor: '#ffffff' },
         dayHeader:       { fontSize: 8, color: '#1e293b' },
         breakText:       { fontSize: 7.5, color: '#b45309' },
         ptText:          { fontSize: 7.5, color: '#6b21a8' },

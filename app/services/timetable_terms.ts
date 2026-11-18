@@ -154,3 +154,25 @@ export const switchToCurrentTerms = async (force = false) => {
   }
   return switched
 }
+
+/**
+ * Teachers log nothing for a date before its term has started. When terms are configured for the class, a date
+ * outside every term (before the first term, or in a gap between terms) is refused; a date after the last term
+ * is left alone. Returns the message to show, or null when logging is allowed.
+ */
+export const termNotStartedMessage = async (
+  classId: number | null | undefined,
+  academicYear: number | null | undefined,
+  date: string
+): Promise<string | null> => {
+  if (!classId || !academicYear) return null
+  const day = dateOnly(date)
+  if (!day) return null
+  const terms = await listTerms(Number(classId), Number(academicYear))
+  if (terms.length === 0) return null
+  if (terms.some((t) => dateOnly(t.start_date)! <= day && day <= dateOnly(t.end_date)!)) return null
+  const next = terms.find((t) => dateOnly(t.start_date)! > day)
+  if (!next) return null
+  const when = DateTime.fromISO(dateOnly(next.start_date)!).toFormat('dd LLL yyyy')
+  return `${next.name} starts on ${when}. Activity cannot be logged before the term starts.`
+}

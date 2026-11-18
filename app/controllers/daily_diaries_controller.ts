@@ -10,6 +10,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import SpacesService from '#services/SpacesService'
 import { closureMessage, getCalendarClosure } from '#services/SyllabusHoursService'
+import { termNotStartedMessage } from '#services/timetable_terms'
 import { lessonPlanIdFor, lessonPlanTargetForPeriod, planItemIds } from '#services/lesson_plan_scope'
 // @ts-ignore
 import PdfPrinterPkg from 'pdfmake/js/Printer.js'
@@ -95,6 +96,11 @@ export default class DailyDiariesController {
         divisionId: periodDetails.division_id,
       })
       if (closure) return response.badRequest({ message: closureMessage(inputData.date, closure) })
+
+      // Nothing can be logged before the term the date falls in has started
+      const division = await db.from('divisions').where('id', periodDetails.division_id).first()
+      const notStarted = await termNotStartedMessage(division?.class_id, periodDetails.academic_year, inputData.date)
+      if (notStarted) return response.badRequest({ message: notStarted })
     }
 
     let targetStaffEnrollmentId: number | null = null

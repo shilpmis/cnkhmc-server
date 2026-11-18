@@ -11,6 +11,7 @@ import { DateTime } from 'luxon'
 import Access from '#services/access_control'
 import { recalculateProgress, toTeachingHours } from '#services/non_lecture_plan'
 import { closureMessage, getCalendarClosure } from '#services/SyllabusHoursService'
+import { termNotStartedMessage } from '#services/timetable_terms'
 
 /** Roles that may manage any teacher's non-lecture logs (Admin, Principal, IT Admin, Super Admin, HOD, Developer) */
 const LOG_MANAGER_ROLE_IDS = [1, 2, 5, 8, 9, 11]
@@ -593,6 +594,10 @@ export default class NonLectureTemplatesController {
         if (closure) {
           return response.badRequest({ success: false, message: closureMessage(finalDate, closure) })
         }
+
+        // Nothing can be logged before the term the date falls in has started
+        const notStarted = await termNotStartedMessage(template.classId, template.academicSessionId, finalDate)
+        if (notStarted) return response.badRequest({ success: false, message: notStarted })
       }
 
       // Same rule as the subject daily diary: teachers log for today unless they were given permission for that date

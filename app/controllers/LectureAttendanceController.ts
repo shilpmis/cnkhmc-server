@@ -12,6 +12,7 @@ import SubjectDivisionMaster from '#models/SubjectDivisionMaster'
 import StudentEnrollments from '#models/StudentEnrollments'
 import Divisions from '#models/Divisions'
 import SpacesService from '#services/SpacesService'
+import { termNotStartedMessage } from '#services/timetable_terms'
 
 const PdfPrinter = PdfPrinterPkg.default || PdfPrinterPkg
 
@@ -417,6 +418,13 @@ export default class LectureAttendanceController {
       }
 
       const dateStr = attendance_date.toISODate()!
+
+      // Teachers cannot mark attendance for a date before its term has started
+      if ([6, 10].includes(Number(ctx.auth.user?.role_id)) && division_id) {
+        const division = await db.from('divisions').where('id', division_id).first()
+        const notStarted = await termNotStartedMessage(division?.class_id, academic_year, dateStr)
+        if (notStarted) return ctx.response.status(400).json({ message: notStarted })
+      }
 
       // Duplicate check for specific lecture session
       let dupQuery = LectureAttendanceMaster.query()
